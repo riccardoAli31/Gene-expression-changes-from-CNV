@@ -26,5 +26,7 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-data/
+#data/
 .ipynb_checkpoints
+
+best_peptide_model_2.pth
