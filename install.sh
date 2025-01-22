@@ -1,9 +1,8 @@
-# Script to install R software for CNV extraction with
-#  CopyKat and epiAneufinder for Unix based OS.
-# Note: CopyKat depends on the igraph package, which
-#  does not work well with conda environments. Thus,
-#  please install this to your machine or a container.
-sudo apt install r-base r-essentials r-cran-irkernel
+# Script to install R software for CNV prediction project
+# CNV extraction is done with CopyKat and epiAneufinder and
+#  installed separately with a Rscript.
+conda create -n cmscb r-base r-essentials python pytorch numpy pandas tqdm torchvision plotnine pytest
+conda activate cmscb
 
 # install R packages from separate script file
 Rscript install.R
