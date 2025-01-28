@@ -8,7 +8,7 @@ dir(data_root)
 
 metadata <- fread(file.path(data_root, "GSE240822_GBM_ccRCC_RNA_metadata_CPTAC_samples.tsv"))
 sample_names <- c("C3N-00495-T1_CPT0078510004_snRNA_ccRCC", "C3L-00004-T1_CPT0001540013_snRNA_ccRCC")
-sample_name <- sample_names[1]
+sample_name <- sample_names[2]
 
 str(metadata[`GEO.sample` == sample_name])
 
