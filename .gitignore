@@ -26,8 +26,9 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-data/
+**/__pycache__/
 .ipynb_checkpoints
+data/
 out/
 log/
 report/
