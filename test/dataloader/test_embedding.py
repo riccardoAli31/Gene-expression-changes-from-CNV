@@ -1,8 +1,57 @@
+import pytest
 import numpy as np
-from src.dataloader.embedding import encode_one_hot_dna, \
-    encode_open_chromatin, encode_CNV_regions, embed
+from src.dataloader.embedding import *
 
-def test_encode_one_hot_dna():
+
+def test_relative_idx():
+	idx = 42
+	interval = (13, 50)
+	assert relative_idx(idx, interval) == 29
+
+	idx = 42
+	interval = (13, 50)
+	assert relative_idx(idx, interval, correct=-1) == 28
+
+	idx = 5
+	interval = (13, 50)
+	with pytest.raises(AssertionError):
+		relative_idx(idx, interval, clip_start=False)
+
+
+def test_interval_overlap():
+	interval_1 = (0, 0)
+	interval_2 = (2, 3)
+	with pytest.raises(AssertionError):
+		interval_overlap(interval_1, interval_2)
+	
+	interval_1 = (0, -3)
+	interval_2 = (2, 3)
+	with pytest.raises(AssertionError):
+		interval_overlap(interval_1, interval_2)
+
+	interval_1 = (10, 20)
+	interval_2 = (22, 30)
+	assert interval_overlap(interval_1, interval_2) == None
+
+	interval_1 = (10, 20)
+	interval_2 = (2, 3)
+	assert interval_overlap(interval_1, interval_2) == None
+
+	interval_1 = (10, 20)
+	interval_2 = (15, 30)
+	assert interval_overlap(interval_1, interval_2) == (15, 20)
+
+	interval_1 = (20, 42)
+	interval_2 = (15, 30)
+	assert interval_overlap(interval_1, interval_2) == (20, 30)
+
+
+def test_dna_padding():
+	dna = 'CTCTAGCTAGCTAGCTATCG'
+	assert dna_padding(dna, 15) == 'CTCTAGCTAGCTAGCNNNNN'
+
+
+def test_encode_dna_seq():
 	# short test case
 	dna_seq = "CGATGCTGTGATGC"
 	expected_result = np.array([
@@ -12,7 +61,7 @@ def test_encode_one_hot_dna():
 		[0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0],
 		[0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0]
 	])
-	assert np.array_equal(encode_one_hot_dna(dna=dna_seq), expected_result)
+	assert np.array_equal(encode_dna_seq(dna=dna_seq), expected_result)
 
 	# simple padding test case
 	dna_seq = "NNNTGCTGTGANNN"
@@ -23,7 +72,7 @@ def test_encode_one_hot_dna():
 		[0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0],
 		[0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0]
 	])
-	assert np.array_equal(encode_one_hot_dna(dna=dna_seq), expected_result)
+	assert np.array_equal(encode_dna_seq(dna=dna_seq), expected_result)
 
 	# long test case
 	dna_seq = "TTCTCTTCGGAGCCAGGAACCAGCTCTTCCAGTGCTGGGGTTTT" + \
@@ -42,7 +91,8 @@ def test_encode_one_hot_dna():
 		[0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0],
 		[1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
 	])
-	assert np.array_equal(encode_one_hot_dna(dna=dna_seq), expected_result)
+	assert np.array_equal(encode_dna_seq(dna=dna_seq), expected_result)
+
 
 def test_encode_open_chromatin():
 	# TODO: account for 0- to 1-based difference and end-inclusive intervals
@@ -50,19 +100,19 @@ def test_encode_open_chromatin():
 	upsteam = 2000
 	downsteam = 8000
 
-	def relative_idx(i, emb_start, emb_end, correct=0):
-		if emb_end < i:
-			i = emb_end
-		assert i >= emb_start and i <= emb_end
-		return i - emb_start + correct
+	# def relative_idx(i, emb_start, emb_end, correct=0):
+	# 	if emb_end < i:
+	# 		i = emb_end
+	# 	assert i >= emb_start and i <= emb_end
+	# 	return i - emb_start + correct
 	
 	# simple one peak case
 	embed_interval = [0, 20]
 	peak_intervals = [(5, 10)]
 	arr_expected = np.zeros(embed_interval[1] - embed_interval[0], dtype='u1')
 	for start, end in peak_intervals:
-		rel_start = relative_idx(start, *embed_interval)
-		rel_end = relative_idx(end, *embed_interval)
+		rel_start = relative_idx(start, embed_interval)
+		rel_end = relative_idx(end, embed_interval)
 		arr_expected[rel_start:rel_end] = 1
 	assert np.array_equal(encode_open_chromatin(embed_interval, peak_intervals), arr_expected)
 
@@ -71,8 +121,8 @@ def test_encode_open_chromatin():
 	peak_intervals = [(5, 10), (13, 17)]
 	arr_expected = np.zeros(embed_interval[1] - embed_interval[0], dtype='u1')
 	for start, end in peak_intervals:
-		rel_start = relative_idx(start, *embed_interval)
-		rel_end = relative_idx(end, *embed_interval)
+		rel_start = relative_idx(start, embed_interval)
+		rel_end = relative_idx(end, embed_interval)
 		arr_expected[rel_start:rel_end] = 1
 	assert np.array_equal(encode_open_chromatin(embed_interval, peak_intervals), arr_expected)
 
@@ -81,8 +131,8 @@ def test_encode_open_chromatin():
 	peak_intervals = [(1, 3), (5, 10), (13, 17), (19, 22)]
 	arr_expected = np.zeros(embed_interval[1] - embed_interval[0], dtype='u1')
 	for start, end in peak_intervals:
-		rel_start = relative_idx(start, *embed_interval)
-		rel_end = relative_idx(end, *embed_interval)
+		rel_start = relative_idx(start, embed_interval)
+		rel_end = relative_idx(end, embed_interval)
 		arr_expected[rel_start:rel_end] = 1
 	assert np.array_equal(encode_open_chromatin(embed_interval, peak_intervals), arr_expected)
 
@@ -91,8 +141,8 @@ def test_encode_open_chromatin():
 	peak_intervals = [(9855, 10676)]
 	arr_expected = np.zeros(embed_interval[1] - embed_interval[0], dtype='u1')
 	for start, end in peak_intervals:
-		rel_start = relative_idx(start, *embed_interval)
-		rel_end = relative_idx(end, *embed_interval)
+		rel_start = relative_idx(start, embed_interval)
+		rel_end = relative_idx(end, embed_interval)
 		arr_expected[rel_start:rel_end] = 1
 	assert np.array_equal(encode_open_chromatin(embed_interval, peak_intervals), arr_expected)
 
@@ -106,15 +156,19 @@ def test_encode_open_chromatin():
 	for start, end in peak_intervals:
 		if start > embed_interval[1]:
 			continue 
-		rel_start = relative_idx(start, *embed_interval)
-		rel_end = relative_idx(end, *embed_interval)
+		rel_start = relative_idx(start, embed_interval)
+		rel_end = relative_idx(end, embed_interval)
 		arr_expected[rel_start:rel_end] = 1
 	assert np.array_equal(encode_open_chromatin(embed_interval, peak_intervals), arr_expected)
 
 
+# def test_encode_CNV_regions():
+#       # TODO
+#       pass
+
+
 # def test_encode_CDS_structure():
 #       # TODO
-
 #       exon_start_stop = [(2, 10)]
 #       expected_result = np.array([
 #             # one hot encoding
@@ -127,14 +181,12 @@ def test_encode_open_chromatin():
 #             # exon structure
 #             [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]
 #       ])
-
 #       # TODO two exon test case
 #       """ dna_string = "CGATGCTGTGATGC"
 #       exon_start_stop = [(0, 16), (23, 33)]
 #       expected_result = np.array([
 #             []
 #       ]) """
-
 #       # TODO real gene test case at 4kb window
 #       """ dna_string = "CGATGCTGTGATGC"
 #       exon_start_stop = [(0, 16), (23, 33)]
@@ -143,15 +195,12 @@ def test_encode_open_chromatin():
 #       ]) """
 #       pass
 
-# def test_encode_CNV_regions():
-#       # TODO
-#       pass
-
 
 def test_embed():
 	gft_path='data/Homo_sapiens.GRCh38.113.gtf.gz'
 	fasta_path='data/GRCh38.d1.vd1.fa'
 	overlap_path='data/overlap_genes_peaks.tsv'
-	embedder = embed(gft_path, fasta_path, overlap_path)
+	epianeu_path='data/epiAneuFinder_results.tsv'
+	embedder = embed(gft_path, fasta_path, overlap_path, epianeu_path)
 	x = next(embedder)
 	print(x)
