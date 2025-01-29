@@ -7,16 +7,14 @@ See https://genomebiology.biomedcentral.com/articles/10.1186/s13059-022-02811-x/
 from numpy import ndarray
 import numpy as np
 import pandas as pd
-from typing import List, Tuple
+from typing import List, Tuple, Union, Set
 import os
 from Bio import SeqIO
 
-# TODO: function to produce open chromatin vector
-#  - load chromosome from generator
-#  - get genomic regions from generator
-#  - get substring of chromosome based on genomic region
-#  - produce one-hot encoding from substring (TODO: create separate funciton to unit test)
-#  - padding function
+# TODO:
+#	- respect non-common DNA letters?
+#	- create CNV rows per barcode
+#	- filter by genes with high expression change
 
 # TODO: implement two different modes:
 # - one returning multiple genes concatenated per cell
@@ -25,6 +23,75 @@ from Bio import SeqIO
 # Possible bugs:
 # - close to chromosomal end
 # - capital and small letters could be in ref genome -> use only capital or small letter
+
+
+def relative_idx(idx: int, interval: Tuple[int,int],
+				 correct: int = 0, clip_start=True,
+				 clip_end=True):
+	"""
+	Calculates relative index inside an interval from an index based outside the interval.
+	E.g. index=42, interval=(13, 50) -> relative index is 29
+	This function is intended to be used on chromosomal indices and intervals.
+
+	idx : int of index based outside the interval
+	interval : Tuple[int,int] of interval start and end coordinates
+	correct : int of index shift correction. I.e. from 0-based to 1-based use +1.
+	clip_* : bool wether idx should be interval start/end, if it exceeds interval start/end.
+		Otherwise an AssertionError will be raised.
+	"""
+
+	start, end = interval
+	assert start < end
+
+	if clip_start and idx < start:
+		idx = start
+	
+	if clip_end and end < idx:
+		idx = end
+	
+	assert start <= idx <= end
+	
+	return idx - start + correct
+
+
+def interval_overlap(interval_1: Tuple[int,int],
+					 interval_2: Tuple[int,int]):
+	"""
+	Calculates the start and end position of an overlap 
+	between two intervals.
+
+	"""
+	start_1, end_1 = interval_1
+	start_2, end_2 = interval_2
+	
+	assert start_1 < end_1 and start_2 < end_2
+
+	if end_1 < start_2 or end_2 < start_1:
+		return None
+	
+	start = start_1 if start_2 <= start_1 else start_2
+	end = end_1 if end_1 <= end_2 else end_2
+
+	return (start, end)
+
+
+def extract_cnv_overlaps(cnv_df: pd.DataFrame, 
+						 barcode: str,
+						 region: Tuple[str,int,int]):
+	"""
+	Extracts all overlaps between rows in the copy number status 
+	data frame and the genomic region of interest (e.g. embedding)
+
+	"""
+
+	r_chrom, r_start, r_end = region
+	overlap_rows = cnv_df[['seq', 'start', 'end', barcode]]\
+		[(cnv_df['seq'] == r_chrom) & ((cnv_df['start'] <  r_start) & (r_end < cnv_df['end']) | (r_start < cnv_df['end']) & (cnv_df['end'] < r_end))]
+	
+	return [
+		(interval_overlap((r_start, r_end), c_status), (c_start, c_end)) 
+		for _, c_start, c_end, c_status in overlap_rows.iterrows()
+	]
 
 
 def extract_gtf_annotation(gtf_line: str, field):
@@ -91,15 +158,16 @@ def generate_fasta_entries(fasta_path='data/GRCh38.d1.vd1.fa.tar.gz'):
 	
 	for entry in SeqIO.parse(fasta_path, 'fasta'):
 		seq_id = entry.id.split(' ')[0].replace('chr', '')
-		print("seq_id:", seq_id)
+		print("Reading Chromosome:", seq_id)
 		seq = str(entry.seq)
-		print("seq[:10]", seq[:10])
 		yield seq_id, seq
 
 
+@DeprecationWarning
 def generate_gene_peak_overlap(file_path: str):
 	"""
-	Generator for creating peak and gene regions from overlap lap.
+	Generator for creating peak and gene regions from overlap between 
+	 ATAC-seq peaks and gene regions.
 	This file is in tsv format with the columns:
 	Chromosome<TAB>Start_peak<TAB>End_peak<TAB>Start_gene<TAB>End_gene<TAB>gene_id
 	Where gene_id refers to the ENSEMBL id for the respective gene.
@@ -119,9 +187,40 @@ def generate_gene_peak_overlap(file_path: str):
 			yield chrom, peak_start, peak_end, gene_start, gene_end, gene_id
 
 
-def encode_one_hot_dna(dna: str, alphabet="ACGT", **kwargs) -> ndarray:
+@DeprecationWarning
+def gernerate_cnv_status_per_barcode(file_path: str):
 	"""
-	Function to produce one-hot encodings for DNA
+	Generator for creating CNV status per barcode.
+	This file is in tsv format with the columns:
+	idx seq start end cell-<BARCODE_ID> ...
+
+	file_path : str of path to file with CNV classifications
+	"""
+	
+	barcode = None
+	with open(file_path, 'r') as in_file:
+		for line in in_file:
+			pass
+
+
+def dna_padding(dna: str, rel_gene_end: int, pad_char: str='N'):
+	"""
+	Replaces DNA sequence downstream of a (relative) gene end position
+	with padding character.
+
+	dna : str of DNA sequence
+	rel_gene_end : int of gene end position on the DNA sequence
+	pad_char : str (default 'N') of padding character (length 1 required)
+	"""
+
+	assert len(pad_char) == 1
+	return dna[:rel_gene_end] + pad_char * (len(dna) - rel_gene_end)
+
+
+def encode_dna_seq(dna: str, alphabet="ACGT", **kwargs) -> ndarray:
+	"""
+	Produces an one-hot-like encoding for DNA.
+	Note: This function will ignore all DNA letters except 'ACGTN'.
 
 	dna_string : str of DNA sequence with posibly N-padding
 	alphabet : str of unique bases to encode. If you want to encode the 
@@ -129,13 +228,11 @@ def encode_one_hot_dna(dna: str, alphabet="ACGT", **kwargs) -> ndarray:
 	"""
 	
 	dna = dna.upper()
-	ignore_N = 'N' not in set(alphabet)
 
 	one_hot_dna = np.zeros((len(alphabet), len(dna)), dtype='u1')
 	for i, aa in enumerate(dna):
-		if ignore_N and aa == 'N':
-			continue
-		one_hot_dna[alphabet.index(aa), i] = 1
+		if aa in alphabet:
+			one_hot_dna[alphabet.index(aa), i] = 1
 
 	return one_hot_dna
 
@@ -154,6 +251,7 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 	"""
 
 	emb_start, emb_end = embedding_interval
+	assert emb_start < emb_end
 	atac_embedding = np.zeros(emb_end - emb_start, dtype='u1')
 	for (peak_start, peak_end) in peak_intervals:
 		if emb_end < peak_start:
@@ -173,18 +271,44 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 	return atac_embedding
 
 
-def encode_CNV_regions():
+def encode_cnv_status(embedding_interval: Tuple[int, int],
+					  cnv_interval_status: List[Tuple[Tuple[int, int],int]],
+					  **kwargs):
+	"""
+	Creates two 0/1 vector encoding both copy number gains and losses.
+	Thus, the gain vector will be 0 at all normal or loss positions and
+	 vice versa.
+	Both vectors are stacked to a 2d array.
+
+	cnv_status : List[int] of copy number status, as follows:
+		0: 'loss', 1: 'normal', 2: 'gain'
+	"""
+
+	emb_start, emb_end = embedding_interval
+	emb_length = emb_end - emb_start
+
+	cnv_gain = np.zeros(emb_length)
+	cnv_loss = np.zeros(emb_length)
+
+	for (start, end), status in cnv_interval_status:
+		start = relative_idx(start, embedding_interval)
+		end = relative_idx(end, embedding_interval)
+		if status == 0:
+			cnv_loss[start:end] = 1
+		elif status == 2:
+			cnv_gain[start:end] = 1
+
+	return np.vstack([cnv_gain, cnv_loss])
+
+
+@PendingDeprecationWarning
+def encode_cds_structure(cds_intervals: List[Tuple[int, int]], seq_len: int, **kwargs) -> ndarray:
 	# TODO
-	pass
+	cds_structure = np.zeros(seq_len, dtype='u1')
+	for start, stop in cds_intervals:
+		cds_structure[start:stop] = 1
 
-
-def encode_CDS_structure(CDS_start_stop: List[Tuple[int, int]], seq_len: int, **kwargs) -> ndarray:
-	# TODO
-	CDS_structure = np.zeros(seq_len, dtype='u1')
-	for start, stop in CDS_start_stop:
-		CDS_structure[start:stop] = 1
-
-	return CDS_structure
+	return cds_structure
 
 
 def encode_reading_frame(CDS_start_stop: List[Tuple[int, int]],seq_len: int, **kwargs):
@@ -199,16 +323,21 @@ def encode_reading_frame(CDS_start_stop: List[Tuple[int, int]],seq_len: int, **k
 	return reading_frame
 
 
-def embed(gtf_path, fasta_path, overlap_path, mode='gene_concat',
-		  parts=[encode_one_hot_dna, encode_open_chromatin],
-		  up_stream_window=2000, down_stream_window=8000):
+def embed(gtf_path, fasta_path, atac_path, cnv_path, mode='gene_concat',
+		  embed_funcs=[encode_dna_seq, encode_open_chromatin],
+		  n_upstream=2000, n_downstream=8000, pad_dna=True,
+		  gene_set: Union[Set[str], None]=None):
 	"""
 	Main wrapper function. Generates embeddings from following files:
 	* gtf genome annotation
 	* fasta genome sequence
 	* overlap data of ATAC-seq peaks and genes
 
-	mode : str one of ['gene_concat', 'sample_channel'] to specify how
+	gtf_path : 
+	fasta_path :
+	atac_path : 
+	cnv_path :  
+	mode : str one of ['gene_concat', 'barcode_channel'] to specify how
 		to combine embeddings
 	"""
 
@@ -217,12 +346,20 @@ def embed(gtf_path, fasta_path, overlap_path, mode='gene_concat',
 	# generate different parts of embedding
 	gtf_generator = generate_genomic_regions(gtf_path)
 	fasta_generator = generate_fasta_entries(fasta_path)
-	# atac_generator = generate_gene_peak_overlap(overlap_path)
 
-	atac_df = pd.read_csv(overlap_path, sep='\t')
+	# load open chromatin peaks
+	atac_df = pd.read_csv(atac_path, sep='\t')
 	atac_df = atac_df.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
 	uniq_gene_ids = list(atac_df['gene_id'].unique())
 
+	# apply subsetting by gene_id
+	if gene_set is not None:
+		uniq_gene_ids = set(uniq_gene_ids).intersection(gene_set)
+
+	# dict to save barcode independent embedding data
+	gene_embeddings = {}
+	gene_positions = {}
+	
 	chrom_id, chrom_seq = next(fasta_generator)
 	for gene_id in uniq_gene_ids:
 
@@ -251,25 +388,64 @@ def embed(gtf_path, fasta_path, overlap_path, mode='gene_concat',
 					.format(gene_id, chrom, gene_start, gene_end, gtf_chrom, gtf_start, gtf_end)
 
 		# compute embedding coordinates
-		# TODO: calibrate downstram window
-		emb_start, emb_end = gene_start - up_stream_window, gene_start + down_stream_window
-		emb_length = emb_end - emb_start
+		emb_start = gene_start - n_upstream
+		emb_end = gene_start + n_downstream
 
 		peaks = [(int(s), int(e))for s, e in gene_df[['Start_peak', 'End_peak']].to_numpy()]
 
+		# get DNA subsequence and apply padding
+		dna_seq = chrom_seq[emb_start:emb_end]
+		if pad_dna:
+			dna_seq = dna_padding(dna_seq, relative_idx(gene_end, (emb_start, emb_end)))
+
 		# create embedding parts
-		embedding = [f(
-			dna=chrom_seq[emb_start:emb_end],
-			embedding_interval=(emb_start, emb_end),
-			peak_intervals=peaks,
-			# TODO: CNV data
-			# TODO: CDS data
-			) for f in parts]
+		embedding = [
+			f(
+				dna=dna_seq,
+				embedding_interval=(emb_start, emb_end),
+				peak_intervals=peaks,
+				# TODO: CNV data
+				# TODO: CDS data
+			) for f in embed_funcs
+		]
 		
 		# combine embedding to one numpy array
 		embedding = np.vstack(embedding)
 
-		# TODO how to return by sample or by gene?
-		yield embedding
+		# save reference genome information in memory
+		gene_embeddings[gene_id] = embedding
+		gene_positions[gene_id] = (chrom, gene_start, gene_end, emb_start, emb_end)
 
+	# load copy number data
+	cnv_df = pd.read_csv(cnv_path, sep=' ')
+	cnv_df = cnv_df.sort_values(by=['seq', 'start', 'end'])
+	cnv_df['seq'] = pd.Series(map(lambda x: x.replace('chr', ''), cnv_df['seq']))
+
+	# combine embeddings based on mode
+	match mode:
+		case 'gene_concat':
+			#	- for loop over all genes and create embeddings for barcode independet data
+			#		(save this in memory if possible)
+			#	- for loop over all barcodes
+			#	- return for each barcode a Tensor of shape (n_data_rows, sequence_length * n_genes)
+			for barcode in cnv_df.columns[4:]:
+				# use list comprehension to create full embedding to return
+				# TODO be mindful of your memory, depending on the number 
+				#  of uniq genes this may become very large 
+				yield np.hstack([
+					np.vstack(
+						gene_embeddings[gene_id],
+						encode_cnv_status(
+							(emb_start, emb_end),
+							extract_cnv_overlaps(cnv_df, barcode, (chrom, emb_start, emb_end))
+						)
+					) for gene_id, (chrom, _, _, emb_start, emb_end) in gene_positions.items()
+				])
+
+		case 'barcode_channel':
+			# TODO
+			#	- for loop over all genes
+			#	- return for each gene a Tensor of shape (n_data_rows, sequence_length, n_barcodes)
+			pass
+		
 
