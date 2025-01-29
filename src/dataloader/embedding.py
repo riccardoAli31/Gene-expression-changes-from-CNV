@@ -8,8 +8,8 @@ from numpy import ndarray
 import numpy as np
 import pandas as pd
 from typing import List, Tuple
-import regex as re
 import os
+from Bio import SeqIO
 
 # TODO: function to produce open chromatin vector
 #  - load chromosome from generator
@@ -84,17 +84,17 @@ def generate_fasta_entries(fasta_path='data/GRCh38.d1.vd1.fa.tar.gz'):
 	Generates for chromosome fasta entries in the order saved in file.
 	Assert that the chromosomes are saved in increasing order, 
 	 starting with Autosomes.
+	The fasta reference used in this project lists chromosomes like this:
+	>chr1  AC:CM000663.2  gi:568336023  LN:248956422  rl:Chromosome  M5:6aef897c3d6ff0c78aff06ac189178dd  AS:GRCh38
+	Thus we need to extract the chromosome name from this string
 	"""
 	
-	seq_id, seq = None, None
-	with open(fasta_path, 'r') as fa_file:
-		for line in fa_file:
-			if line.startswith('>'):
-				if seq_id is not None:
-					yield (seq_id, seq.upper())
-				seq_id = line.strip()
-			else:
-				seq += line.strip()
+	for entry in SeqIO.parse(fasta_path, 'fasta'):
+		seq_id = entry.id.split(' ')[0].replace('chr', '')
+		print("seq_id:", seq_id)
+		seq = str(entry.seq)
+		print("seq[:10]", seq[:10])
+		yield seq_id, seq
 
 
 def generate_gene_peak_overlap(file_path: str):
@@ -119,17 +119,17 @@ def generate_gene_peak_overlap(file_path: str):
 			yield chrom, peak_start, peak_end, gene_start, gene_end, gene_id
 
 
-def encode_one_hot_dna(dna: str, alphabet=set("ACGT"), **kwargs) -> ndarray:
+def encode_one_hot_dna(dna: str, alphabet="ACGT", **kwargs) -> ndarray:
 	"""
 	Function to produce one-hot encodings for DNA
 
 	dna_string : str of DNA sequence with posibly N-padding
-	alphabet : set of bases to encode. If you want to encode the 
+	alphabet : str of unique bases to encode. If you want to encode the 
 			N padding as a separate row, please adapt this here.  
 	"""
 	
 	dna = dna.upper()
-	ignore_N = 'N' not in alphabet
+	ignore_N = 'N' not in set(alphabet)
 
 	one_hot_dna = np.zeros((len(alphabet), len(dna)), dtype='u1')
 	for i, aa in enumerate(dna):
@@ -141,7 +141,8 @@ def encode_one_hot_dna(dna: str, alphabet=set("ACGT"), **kwargs) -> ndarray:
 
 
 def encode_open_chromatin(embedding_interval: Tuple[int, int], 
-						  peak_intervals: List[Tuple[int, int]], **kwargs) -> ndarray:
+						  peak_intervals: List[Tuple[int, int]],
+						  **kwargs) -> ndarray:
 	"""
 	Creates the open chromatin embedding part, that observes ones all
 	genmoic positions that are in open chromatin and 0 for closed.
@@ -153,8 +154,13 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 	"""
 
 	emb_start, emb_end = embedding_interval
-	atac_embedding = np.zeros(emb_end - emb_start)
+	atac_embedding = np.zeros(emb_end - emb_start, dtype='u1')
 	for (peak_start, peak_end) in peak_intervals:
+		if emb_end < peak_start:
+			continue
+		if emb_end < peak_end:
+			peak_end = emb_end
+
 		# sanity check there is an overlap between gene and peak
 		assert peak_start < emb_end and emb_start < peak_end
 
@@ -193,26 +199,9 @@ def encode_reading_frame(CDS_start_stop: List[Tuple[int, int]],seq_len: int, **k
 	return reading_frame
 
 
-def combine_embedding(rows: List[ndarray], mode: str):
-	"""
-	Wrapper that stacks different embedding parts (e.g. DNA one-hot, open chromatin, etc.)
-	
-	"""
-	assert all(map(rows, lambda x: x.shape[1] == rows[0].shape[1]))
-
-	embedding = np.vstack(rows)
-
-	# TODO create embeddings in different modes: gene concatenation per sample or sample channels per gene
-	match mode:
-		case 'gene_concat':
-			return embedding
-		case 'sample_channel':
-			pass
-
-
 def embed(gtf_path, fasta_path, overlap_path, mode='gene_concat',
 		  parts=[encode_one_hot_dna, encode_open_chromatin],
-		  up_stream_window=2000, down_stream_window=4000):
+		  up_stream_window=2000, down_stream_window=8000):
 	"""
 	Main wrapper function. Generates embeddings from following files:
 	* gtf genome annotation
@@ -241,8 +230,8 @@ def embed(gtf_path, fasta_path, overlap_path, mode='gene_concat',
 		assert gene_df[['Chromosome', 'Start_gene', 'End_gene', 'gene_id']]\
 			.drop_duplicates().shape == (1, 4), "Ambiguous gene region for {}".format(gene_id)
 		chrom = str(*gene_df['Chromosome'].unique())
-		gene_start = int(*gene_df['Chromosome'].unique())
-		gene_end = int(*gene_df['Chromosome'].unique())
+		gene_start = int(*gene_df['Start_gene'].unique())
+		gene_end = int(*gene_df['End_gene'].unique())
 
 		# assert that the correct chromosome fasta entry is loaded
 		while chrom_id != chrom:
@@ -269,17 +258,15 @@ def embed(gtf_path, fasta_path, overlap_path, mode='gene_concat',
 		peaks = [(int(s), int(e))for s, e in gene_df[['Start_peak', 'End_peak']].to_numpy()]
 
 		# create embedding parts
-		embedding = map(parts, lambda x: x(
+		embedding = [f(
 			dna=chrom_seq[emb_start:emb_end],
 			embedding_interval=(emb_start, emb_end),
 			peak_intervals=peaks,
 			# TODO: CNV data
 			# TODO: CDS data
-			))
+			) for f in parts]
 		
-		assert all([embedding.shape[1] == emb_length]), "Embedding parts don't match in length."
-
-		# combine embedding parts
+		# combine embedding to one numpy array
 		embedding = np.vstack(embedding)
 
 		# TODO how to return by sample or by gene?
