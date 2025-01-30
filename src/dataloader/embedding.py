@@ -4,15 +4,18 @@
 Script for creating embeddings from DNA regions.
 See https://genomebiology.biomedcentral.com/articles/10.1186/s13059-022-02811-x/figures/5 
 """
+
 from numpy import ndarray
 import numpy as np
 import pandas as pd
 from typing import List, Tuple, Union, Set
 import os
 from Bio import SeqIO
+import gzip
 
 # TODO:
 #	- respect non-common DNA letters?
+#	- read reference genome from .fasta.tar.gz using import tarfile? 
 #	- create CNV rows per barcode
 #	- filter by genes with high expression change
 
@@ -24,6 +27,11 @@ from Bio import SeqIO
 # - close to chromosomal end
 # - capital and small letters could be in ref genome -> use only capital or small letter
 
+
+autosomes = list(map(str, range(1,22)))
+allosomes = ['X', 'Y']
+standard_chromosomes = list(map(str, range(1,22)))
+standard_chromosomes.extend(allosomes)
 
 def relative_idx(idx: int, interval: Tuple[int,int],
 				 correct: int = 0, clip_start=True,
@@ -101,6 +109,8 @@ def extract_gtf_annotation(gtf_line: str, field):
 		"""
 		# TODO: use field_name variable to generalize this function
 		# gtf_annotation.split(';')[0].split('\"')[-2]
+		if gtf_line.startswith('#'):
+			return ''
 		gtf_annotation = gtf_line.split('\t')[-1]
 		gtf_annotation = {splt.split('\"')[0].strip(): splt.split('\"')[1].strip() for splt in gtf_annotation.split(';')}
 		
@@ -122,9 +132,10 @@ def generate_genomic_regions(gene_ids: List[str],
 	# sample gft line
 	# 1	ensembl_havana	gene	3069168	3438621	.	+	.	gene_id "ENSG00000142611"; gene_version "17"; gene_name "PRDM16"; gene_source "ensembl_havana"; gene_biotype "protein_coding";
 	
+	# TODO remove gene ids and filter after extraction on entry type
 	gene_id_iterator = iter(gene_ids)
 
-	with open(path_to_gft, 'r') as gtf_file:
+	with gzip.open(path_to_gft, 'r') as gtf_file:
 		gene_id = next(gene_id_iterator)
 		gene_id_seen = False
 		for line in gtf_file:
@@ -135,7 +146,7 @@ def generate_genomic_regions(gene_ids: List[str],
 				if line_split[2] in entry_types:
 					# TODO assert gene_biotype "protein_coding"?
 					chrom, _, entry_type, start, end, _, strand = line_split[:6]
-					yield (int(chrom), entry_type, int(start), int(end), strand, gene_id)
+					yield (str(chrom), entry_type, int(start), int(end), strand, gene_id)
 
 			elif gene_id_seen:
 					gene_id = next(gene_id_iterator)
@@ -146,11 +157,14 @@ def generate_genomic_regions(gene_ids: List[str],
 						gene_id_seen = False
 
 
-def generate_fasta_entries(fasta_path='data/GRCh38.d1.vd1.fa.tar.gz'):
+def generate_fasta_entries(fasta_path='data/GRCh38.d1.vd1.fa',
+						   verbose=False, only_standard_chrom=True):
 	"""
 	Generates for chromosome fasta entries in the order saved in file.
 	Assert that the chromosomes are saved in increasing order, 
 	 starting with Autosomes.
+	
+	Download the GRCh38.d1.vd1.fa.tar.gz refence genome from the [GDC](https://api.gdc.cancer.gov/data/254f697d-310d-4d7d-a27b-27fbf767a834)
 	The fasta reference used in this project lists chromosomes like this:
 	>chr1  AC:CM000663.2  gi:568336023  LN:248956422  rl:Chromosome  M5:6aef897c3d6ff0c78aff06ac189178dd  AS:GRCh38
 	Thus we need to extract the chromosome name from this string
@@ -158,7 +172,9 @@ def generate_fasta_entries(fasta_path='data/GRCh38.d1.vd1.fa.tar.gz'):
 	
 	for entry in SeqIO.parse(fasta_path, 'fasta'):
 		seq_id = entry.id.split(' ')[0].replace('chr', '')
-		print("Reading Chromosome:", seq_id)
+		if only_standard_chrom and seq_id not in standard_chromosomes:
+			continue
+		print("Reading Chromosome:", seq_id) if verbose else None
 		seq = str(entry.seq)
 		yield seq_id, seq
 
@@ -254,7 +270,7 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 	assert emb_start < emb_end
 	atac_embedding = np.zeros(emb_end - emb_start, dtype='u1')
 	for (peak_start, peak_end) in peak_intervals:
-		if emb_end < peak_start:
+		if emb_end <= peak_start:
 			continue
 		if emb_end < peak_end:
 			peak_end = emb_end
@@ -311,6 +327,7 @@ def encode_cds_structure(cds_intervals: List[Tuple[int, int]], seq_len: int, **k
 	return cds_structure
 
 
+@PendingDeprecationWarning
 def encode_reading_frame(CDS_start_stop: List[Tuple[int, int]],seq_len: int, **kwargs):
 	# TODO compute reading frame from CDS structure
 	codon_size = 3
@@ -323,10 +340,10 @@ def encode_reading_frame(CDS_start_stop: List[Tuple[int, int]],seq_len: int, **k
 	return reading_frame
 
 
-def embed(gtf_path, fasta_path, atac_path, cnv_path, mode='gene_concat',
+def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
+		  gtf_path=None, gene_set: Union[Set[str], None]=None,
 		  embed_funcs=[encode_dna_seq, encode_open_chromatin],
-		  n_upstream=2000, n_downstream=8000, pad_dna=True,
-		  gene_set: Union[Set[str], None]=None):
+		  n_upstream=2000, n_downstream=8000, pad_dna=True):
 	"""
 	Main wrapper function. Generates embeddings from following files:
 	* gtf genome annotation
@@ -341,6 +358,7 @@ def embed(gtf_path, fasta_path, atac_path, cnv_path, mode='gene_concat',
 		to combine embeddings
 	"""
 
+	verbose = False
 	sanity_check_regions = False
 	
 	# generate different parts of embedding
@@ -349,7 +367,17 @@ def embed(gtf_path, fasta_path, atac_path, cnv_path, mode='gene_concat',
 
 	# load open chromatin peaks
 	atac_df = pd.read_csv(atac_path, sep='\t')
-	atac_df = atac_df.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
+	# sort autosomes on integer index
+	print("autosomes", autosomes)
+	atac_df_auto = atac_df[atac_df['Chromosome'].isin(autosomes)].copy()
+	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(np.uint8)
+	atac_df_auto = atac_df_auto.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
+	# sort allosomes separately
+	atac_df_allo = atac_df[atac_df['Chromosome'].isin(allosomes)].copy()
+	atac_df_allo = atac_df_allo.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
+	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
+	# concat sorted dataframes
+	atac_df = pd.concat([atac_df_auto, atac_df_allo])
 	uniq_gene_ids = list(atac_df['gene_id'].unique())
 
 	# apply subsetting by gene_id
@@ -361,6 +389,7 @@ def embed(gtf_path, fasta_path, atac_path, cnv_path, mode='gene_concat',
 	gene_positions = {}
 	
 	chrom_id, chrom_seq = next(fasta_generator)
+	print("chrom_id:", chrom_id) if verbose else None
 	for gene_id in uniq_gene_ids:
 
 		gene_df = atac_df[atac_df['gene_id'] == gene_id]
@@ -369,10 +398,12 @@ def embed(gtf_path, fasta_path, atac_path, cnv_path, mode='gene_concat',
 		chrom = str(*gene_df['Chromosome'].unique())
 		gene_start = int(*gene_df['Start_gene'].unique())
 		gene_end = int(*gene_df['End_gene'].unique())
+		print(gene_id, 'on', chrom, ':', gene_start, '-', gene_end) if verbose else None
 
 		# assert that the correct chromosome fasta entry is loaded
 		while chrom_id != chrom:
 			chrom_id, chrom_seq = next(fasta_generator)
+			print("chrom_id:", chrom_id) if verbose else None
 		assert chrom_id == chrom, "Chromosome mismatch {} != {}".format(chrom_id, chrom)
 
 		# sanity check genomic regions
@@ -404,7 +435,6 @@ def embed(gtf_path, fasta_path, atac_path, cnv_path, mode='gene_concat',
 				dna=dna_seq,
 				embedding_interval=(emb_start, emb_end),
 				peak_intervals=peaks,
-				# TODO: CNV data
 				# TODO: CDS data
 			) for f in embed_funcs
 		]
