@@ -286,15 +286,20 @@ def encode_cnv_status(embedding_interval: Tuple[int, int],
 		0: 'loss', 1: 'normal', 2: 'gain'
 	"""
 
+	print(cnv_interval_status)
+
 	emb_start, emb_end = embedding_interval
 	emb_length = emb_end - emb_start
 
 	# TODO: how to handle missing values / CNV overlaps?
 	if cnv_interval_status == [((),)]:
+		print('empty emb:', emb_start, '-', emb_end, '=', emb_length)
 		return np.zeros((2, emb_length))
 
 	cnv_loss = np.zeros(emb_length)
 	cnv_gain = np.zeros(emb_length)
+
+	print('emb:', emb_start, '-', emb_end, '=', emb_length)
 
 	for (start, end), status in cnv_interval_status:
 		start = relative_idx(start, embedding_interval)
@@ -380,7 +385,11 @@ def embed_atac(atac_df: pd.DataFrame, regions, embedding_window: Tuple[int,int])
 
 
 
-def embed_cnv(cnv_path: str, regions, mode='gene_concat'):
+def embed_cnv(cnv_path: str, gene_regions,
+		embedding_window: Tuple[int,int], mode='gene_concat'):
+
+	emb_upstream, emb_downstream = embedding_window
+
 	# load copy number data
 	cnv_df = pd.read_csv(cnv_path, sep=' ')
 	cnv_df = cnv_df.sort_values(by=['seq', 'start', 'end'])
@@ -388,15 +397,16 @@ def embed_cnv(cnv_path: str, regions, mode='gene_concat'):
 
 	# TODO switch for loops depending on mode
 	for barcode in cnv_df.columns[4:]:
-		for chrom, start, end in regions:
+		print(barcode)
+		for chrom, gene_start, _ in gene_regions:
+			emb_start, emb_end = gene_start - emb_upstream, gene_start + emb_downstream
 			yield (
 				barcode,
 				encode_cnv_status(
-					(start, end),
-					extract_cnv_overlaps(cnv_df, barcode, (chrom, start, end))
+					(emb_start, emb_end),
+					extract_cnv_overlaps(cnv_df, barcode, (chrom, emb_start, emb_end))
 				)
 			)
-
 
 
 def main(fasta_path, atac_path):
