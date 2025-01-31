@@ -335,7 +335,7 @@ def encode_reading_frame(CDS_start_stop: List[Tuple[int, int]],seq_len: int, **k
 	return reading_frame
 
 
-def embed_dna(gene_regions: List[Tuple[str,int,int]], fasta_path: str,
+def embed_dna(gene_regions: pd.DataFrame, fasta_path: str,
 		embedding_window: Tuple[int,int], pad_dna=True, verbose=False):
 	# generate DNA embeddings
 	assert os.path.isfile(fasta_path), "FASTA file not found: {}".format(fasta_path)
@@ -344,7 +344,7 @@ def embed_dna(gene_regions: List[Tuple[str,int,int]], fasta_path: str,
 
 	chrom_id, chrom_seq = next(fasta_generator)
 	print("chrom_id:", chrom_id) if verbose else None
-	for chrom, gene_start, gene_end in gene_regions:
+	for _, (chrom, gene_start, gene_end, _) in gene_regions.iterrows():
 		# assert that the correct chromosome fasta entry is loaded
 		while chrom_id != chrom:
 			chrom_id, chrom_seq = next(fasta_generator)
@@ -361,9 +361,9 @@ def embed_dna(gene_regions: List[Tuple[str,int,int]], fasta_path: str,
 		yield (chrom, emb_start, emb_end, encode_dna_seq(dna_seq))
 	
 
-def embed_atac(atac_df: pd.DataFrame, regions, embedding_window: Tuple[int,int]):
+def embed_atac(atac_df: pd.DataFrame, regions: pd.DataFrame, embedding_window: Tuple[int,int]):
 	emb_upstream, emb_downstream = embedding_window
-	for chrom, gene_start, gene_end in regions:
+	for _, (chrom, gene_start, gene_end, _) in regions.iterrows():
 		emb_start, emb_end = gene_start - emb_upstream, gene_start + emb_downstream
 		gene_df = atac_df[
 			(atac_df['Chromosome'] == chrom) & 
@@ -385,7 +385,7 @@ def embed_atac(atac_df: pd.DataFrame, regions, embedding_window: Tuple[int,int])
 
 
 
-def embed_cnv(cnv_path: str, gene_regions,
+def embed_cnv(cnv_path: str, gene_regions: pd.DataFrame,
 		embedding_window: Tuple[int,int], mode='gene_concat'):
 
 	emb_upstream, emb_downstream = embedding_window
@@ -398,7 +398,7 @@ def embed_cnv(cnv_path: str, gene_regions,
 	# TODO switch for loops depending on mode
 	for barcode in cnv_df.columns[4:]:
 		print(barcode)
-		for chrom, gene_start, _ in gene_regions:
+		for _, (chrom, gene_start, _, _) in gene_regions.iterrows():
 			emb_start, emb_end = gene_start - emb_upstream, gene_start + emb_downstream
 			yield (
 				barcode,
@@ -409,11 +409,10 @@ def embed_cnv(cnv_path: str, gene_regions,
 			)
 
 
-def main(fasta_path, atac_path):
-
-	# generate different parts of embedding
-	# gtf_generator = generate_genomic_regions(gtf_path)
-	fasta_generator = generate_fasta_entries(fasta_path)
+def main(fasta_path, atac_path, cnv_path, mode='gene_concat',
+		  gtf_path=None, gene_set: Union[Set[str], None]=None,
+		  embed_funcs=[encode_dna_seq, encode_open_chromatin],
+		  n_upstream=2000, n_downstream=8000, pad_dna=True):
 
 	# load open chromatin peaks
 	atac_df = pd.read_csv(atac_path, sep='\t')
@@ -429,7 +428,26 @@ def main(fasta_path, atac_path):
 	atac_df = pd.concat([atac_df_auto, atac_df_allo])
 	uniq_gene_ids = list(atac_df['gene_id'].unique())
 
+	# apply subsetting by gene_id
+	if gene_set is not None:
+		uniq_gene_ids = set(uniq_gene_ids).intersection(gene_set)
 
+	atac_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)][['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
+
+	# create embedding part generators
+	dna_embedder = embed_dna(atac_df)
+
+	genomic_embeddings = []
+	for chrom, gene_start, gene_end, gene_id in atac_df.iterrows():
+		
+		embedding = [
+			f(
+				dna=dna_seq,
+				embedding_interval=(emb_start, emb_end),
+				peak_intervals=peaks,
+				# TODO: CDS data
+			) for f in embed_funcs
+		]
 	
 
 

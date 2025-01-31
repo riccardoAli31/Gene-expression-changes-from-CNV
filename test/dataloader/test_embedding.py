@@ -326,60 +326,66 @@ from src.dataloader.embedding import *
 # 		assert n_gene_entries == i
 
 
-# def test_embed_dna():
-# 	fasta_path='data/GRCh38.d1.vd1.fa'
-# 	test_regions = [
-# 		('1', 9121, 26894),
-# 		('1', 584945, 829989)
-# 	]
-# 	embed_size = (2000, 8000)
-# 	dna_embedder = embed_dna(test_regions, fasta_path, embed_size)
+def test_embed_dna():
+	fasta_path='data/GRCh38.d1.vd1.fa'
+	test_regions = pd.DataFrame({
+		'Chromosome': ['1'] * 2,
+		'Start_gene': [9121, 26894],
+		'Eng_gene': [584945, 829989],
+		'gene_id': ['foo', 'bar']
+	})
+	embed_size = (2000, 8000)
+	dna_embedder = embed_dna(test_regions, fasta_path, embed_size)
 
-# 	for c, s, e in test_regions:
-# 		chrom, embd_start, embd_end, dna_embedding = next(dna_embedder)
-# 		# assert c == chrom and embd_start == s - embed_size[0] and embd_end == e + embed_size[1]
-# 		assert dna_embedding.shape == (4, sum(embed_size))
+	for _, (c, s, e, _ ) in test_regions.iterrows():
+		chrom, embd_start, embd_end, dna_embedding = next(dna_embedder)
+		# assert c == chrom and embd_start == s - embed_size[0] and embd_end == e + embed_size[1]
+		assert dna_embedding.shape == (4, sum(embed_size))
 
 
-# def test_embed_atac():
-# 	atac_path='data/overlap_genes_peaks.tsv'
-# 	test_regions = [
-# 		('1', 9121, 26894),
-# 		('1', 584945, 829989)
-# 	]
-# 	embed_size = (2000, 8000)
+def test_embed_atac():
+	atac_path='data/overlap_genes_peaks.tsv'
+	test_regions = pd.DataFrame({
+		'Chromosome': ['1'] * 2,
+		'Start_gene': [9121, 26894],
+		'Eng_gene': [584945, 829989],
+		'gene_id': ['foo', 'bar']
+	})
+	embed_size = (2000, 8000)
 
-# 	# load open chromatin peaks
-# 	atac_df = pd.read_csv(atac_path, sep='\t')
-# 	# sort autosomes on integer index
-# 	atac_df_auto = atac_df[atac_df['Chromosome'].isin(autosomes)].copy()
-# 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(np.uint8)
-# 	atac_df_auto = atac_df_auto.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
-# 	# sort allosomes separately
-# 	atac_df_allo = atac_df[atac_df['Chromosome'].isin(allosomes)].copy()
-# 	atac_df_allo = atac_df_allo.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
-# 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
-# 	# concat sorted dataframes
-# 	atac_df = pd.concat([atac_df_auto, atac_df_allo])
+	# load open chromatin peaks
+	atac_df = pd.read_csv(atac_path, sep='\t')
+	# sort autosomes on integer index
+	atac_df_auto = atac_df[atac_df['Chromosome'].isin(autosomes)].copy()
+	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(np.uint8)
+	atac_df_auto = atac_df_auto.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
+	# sort allosomes separately
+	atac_df_allo = atac_df[atac_df['Chromosome'].isin(allosomes)].copy()
+	atac_df_allo = atac_df_allo.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
+	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
+	# concat sorted dataframes
+	atac_df = pd.concat([atac_df_auto, atac_df_allo])
 
-# 	atac_embedder = embed_atac(atac_df, test_regions, embed_size)
+	atac_embedder = embed_atac(atac_df, test_regions, embed_size)
 
-# 	for c, s, e in test_regions:
-# 		chrom, embd_start, embd_end, atac_embedding = next(atac_embedder)
-# 		# assert c == chrom and embd_start == s - embed_size[0] and embd_end == e + embed_size[1]
-# 		assert atac_embedding.shape == (1, sum(embed_size))
+	for _, (c, s, e, _ ) in test_regions.iterrows():
+		chrom, embd_start, embd_end, atac_embedding = next(atac_embedder)
+		# assert c == chrom and embd_start == s - embed_size[0] and embd_end == e + embed_size[1]
+		assert atac_embedding.shape == (1, sum(embed_size))
 
 
 def test_embed_cnv():
 	epianeu_path='data/epiAneuFinder_results.tsv'
-	test_regions = [
-		('1', 9121, 26894),
-		('1', 584945, 829989)
-	]
+	test_regions = pd.DataFrame({
+		'Chromosome': ['1'] * 2,
+		'Start_gene': [9121, 26894],
+		'Eng_gene': [584945, 829989],
+		'gene_id': ['foo', 'bar']
+	})
 	embed_size = (2000, 8000)
 	cnv_embedder = embed_cnv(epianeu_path, test_regions, embed_size)
-	for region in test_regions:
-		print(region[0], ':', str(region[1]), '-', str(region[2]))
+	for _, (c, s, e, _ ) in test_regions.iterrows():
+		print(c, ':', str(s), '-', str(e))
 		barcode, cnv_embedding = next(cnv_embedder)
 		assert cnv_embedding.shape == (2, sum(embed_size)), "{} wrong CNV shape".format(barcode)
 
