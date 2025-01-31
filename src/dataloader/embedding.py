@@ -289,8 +289,12 @@ def encode_cnv_status(embedding_interval: Tuple[int, int],
 	emb_start, emb_end = embedding_interval
 	emb_length = emb_end - emb_start
 
-	cnv_gain = np.zeros(emb_length)
+	# TODO: how to handle missing values / CNV overlaps?
+	if cnv_interval_status == [((),)]:
+		return np.zeros((2, emb_length))
+
 	cnv_loss = np.zeros(emb_length)
+	cnv_gain = np.zeros(emb_length)
 
 	for (start, end), status in cnv_interval_status:
 		start = relative_idx(start, embedding_interval)
@@ -300,7 +304,7 @@ def encode_cnv_status(embedding_interval: Tuple[int, int],
 		elif status == 2:
 			cnv_gain[start:end] = 1
 
-	return np.vstack([cnv_gain, cnv_loss])
+	return np.vstack([cnv_loss, cnv_gain])
 
 
 @PendingDeprecationWarning

@@ -202,11 +202,56 @@ def test_extract_cnv_overlaps():
 		assert cnv_overlaps == expected_result
 
 
+def test_encode_cnv_status():
+	# missing data test
+	embed_interval = [0, 20]
+	cnv_interval_status = [((),)]
+	arr_expected = np.zeros((2, embed_interval[1]))
+	assert np.array_equal(
+		encode_cnv_status(embed_interval, cnv_interval_status),
+		arr_expected
+	)
 
+	# normal CNV test, single interval
+	embed_interval = [0, 20]
+	cnv_interval_status = [((7, 15), 1)]
+	arr_expected = np.zeros((2, embed_interval[1]))
+	assert np.array_equal(
+		encode_cnv_status(embed_interval, cnv_interval_status),
+		arr_expected
+	)
 
-# def test_encode_CNV_regions():
-#       # TODO
-#       pass
+	# loss CNV test, single interval
+	embed_interval = [0, 20]
+	cnv_interval_status = [((7, 15), 0)]
+	arr_expected = np.zeros((2, embed_interval[1]))
+	arr_expected[0,7:15] = 1
+	assert np.array_equal(
+		encode_cnv_status(embed_interval, cnv_interval_status),
+		arr_expected
+	)
+
+	# gain CNV test, single interval
+	embed_interval = [0, 20]
+	cnv_interval_status = [((3, 11), 2)]
+	arr_expected = np.zeros((2, embed_interval[1]))
+	arr_expected[1,3:11] = 1
+	assert np.array_equal(
+		encode_cnv_status(embed_interval, cnv_interval_status),
+		arr_expected
+	)
+
+	# mixed CNV test, multi interval
+	embed_interval = [0, 20]
+	cnv_interval_status = [((3, 7), 2), ((10, 13), 1), ((18, 20), 0)]
+	arr_expected = np.zeros((2, embed_interval[1]))
+	arr_expected[0,18:20] = 1
+	arr_expected[1,3:7] = 1
+	assert np.array_equal(
+		encode_cnv_status(embed_interval, cnv_interval_status),
+		arr_expected
+	)
+      
 
 # def test_encode_CDS_structure():
 #       # TODO
