@@ -16,17 +16,14 @@ from ..util import relative_idx
 
 # TODO:
 #	- how to handle missing CNV overlaps
-#	- read reference genome from .fasta.tar.gz using import tarfile? 
-#	- create CNV rows per barcode
-#	- filter by genes with high expression change
+#	- read reference genome from .fasta.tar.gz using import tarfile?
 
 # TODO: implement two different modes:
 # - one returning multiple genes concatenated per cell
 # - another returning multiple genes as channels for each gene
 
 # Possible bugs:
-# - close to chromosomal end
-# - capital and small letters could be in ref genome -> use only capital or small letter
+# - close to chromosomal end -> no epiAneufinder data
 
 def encode_dna_seq(dna: str, alphabet="ACGT", **kwargs) -> ndarray:
 	"""
@@ -228,9 +225,9 @@ def embed_cnv(gene_regions: pd.DataFrame, cnv_path: str,
 					)
 	
 
-def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
-		gtf_path=None, gene_set: Union[Set[str], None]=None,
-		barcode_set: Union[Set[str], None]=None,
+def embed(fasta_path, atac_path, cnv_path,
+		gene_set: Union[Set[str], None],
+		barcode_set: Union[Set[str], None], mode='gene_concat',
 		n_upstream=2000, n_downstream=8000, pad_dna=True):
 	"""
 	Main wrapper function. Generates embeddings from following files:
@@ -242,7 +239,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	fasta_path :
 	atac_path : 
 	cnv_path :  
-	mode : str one of ['gene_concat', 'barcode_channel'] to specify how
+	mode : str one of ['gene_concat', 'barcode_channel', 'single_gene_barcode'] to specify how
 		to combine embeddings
 	"""
 
@@ -267,6 +264,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	gene_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)][['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
 
 	# create embedding part generators
+	# TODO: divide into barcode, dependent and barcode independent and create using list of funcitons
 	dna_embedder = embed_dna(gene_df, fasta_path, (n_upstream, n_downstream), pad_dna=pad_dna)
 	atac_embedder = embed_atac(gene_df, atac_df, (n_upstream, n_downstream))
 	cnv_embedder = embed_cnv(
