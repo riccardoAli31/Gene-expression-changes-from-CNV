@@ -136,29 +136,6 @@ def encode_cnv_status(embedding_interval: Tuple[int, int],
 	return np.vstack([cnv_loss, cnv_gain])
 
 
-# @PendingDeprecationWarning
-# def encode_cds_structure(cds_intervals: List[Tuple[int, int]], seq_len: int, **kwargs) -> ndarray:
-# 	# TODO
-# 	cds_structure = np.zeros(seq_len, dtype='u1')
-# 	for start, stop in cds_intervals:
-# 		cds_structure[start:stop] = 1
-
-# 	return cds_structure
-
-
-# @PendingDeprecationWarning
-# def encode_reading_frame(CDS_start_stop: List[Tuple[int, int]],seq_len: int, **kwargs):
-# 	# TODO compute reading frame from CDS structure
-# 	codon_size = 3
-# 	reading_frame = np.zeros(seq_len, dtype='u1')
-# 	overhead = 0
-# 	for start, stop in CDS_start_stop:
-# 		reading_frame[list(start + (codon_size - overhead), stop, codon_size)] = 1
-# 		overhead = (stop - start + overhead) % 3
-
-# 	return reading_frame
-
-
 def embed_dna(gene_regions: pd.DataFrame, fasta_path: str,
 		embedding_window: Tuple[int,int], pad_dna=True, verbose=False):
 	# generate DNA embeddings
@@ -225,7 +202,7 @@ def embed_cnv(gene_regions: pd.DataFrame, cnv_path: str,
 
 	match mode:
 		case 'gene_concat' | 'single_gene_barcode':
-			for barcode in cnv_df.columns[4:]:
+			for barcode in cnv_df.columns[3:]:
 				for _, (chrom, gene_start, _, gene_id) in gene_regions.iterrows():
 					emb_start, emb_end = gene_start - emb_upstream, gene_start + emb_downstream
 					yield (
@@ -302,7 +279,6 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 
 	genomic_embeddings = []
 	barcode_embeddings = []
-	barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
 	# barcode_embeddings.append(cnv_embedding)
 	for _, (chrom, gene_start, gene_end, gene_id) in gene_df.iterrows():
 		
@@ -316,44 +292,40 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 
 		genomic_embeddings.append(genomic_embedding)
 
-		next_barcode, next_cnv_gene_id, next_cnv_embedding = next(cnv_embedder)
+		barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
 
-		if mode == 'barcode_channel':
-			# TODO: debug
-			while cnv_gene_id == gene_id:
-				print(gene_id, barcode)
-				barcode_embeddings.append(cnv_embedding)
-				barcode, cnv_gene_id, cnv_embedding = next_barcode, next_cnv_gene_id, next_cnv_embedding
-				next_barcode, next_cnv_gene_id, next_cnv_embedding = next(cnv_embedder)
-			# TODO: repreat genomic embedding len(barcode_embeddings) times
-			# numpy.tile(genomic_embedding, (*genomic_embedding.shape, len(barcode_embeddings)))
-			yield np.vstack([genomic_embedding, np.vstack(barcode_embeddings)])
-			barcode_embeddings = [cnv_embedding]
-			barcode, cnv_gene_id, cnv_embedding = next_barcode, next_cnv_gene_id, next_cnv_embedding
-			continue
-		if mode == 'single_gene_barcode':
-				yield np.vstack([genomic_embedding, cnv_embedding])
-		elif barcode is not None and next_barcode != barcode:
-			# TODO: can this even be reached?
-			if mode == 'gene_concat':
-				barcode_embeddings.append(cnv_embedding)
-				yield np.vstack([
-					np.hstack(genomic_embeddings),
-					np.hstack(barcode_embeddings)
-				])
-				barcode_embeddings = []
-		else:
-			if mode == 'gene_concat':
-				barcode_embeddings.append(cnv_embedding)
-		
-		barcode, cnv_gene_id, cnv_embedding = next_barcode, next_cnv_gene_id, next_cnv_embedding
-	
-	if mode == 'barcode_channel':
-		return
-	elif mode == 'gene_concat':
-		# TODO: generate all barcode embeddings for noxt barcode 
+		match mode:
+			case 'barcode_channel':
+				# TODO: debug
+				while cnv_gene_id == gene_id:
+					print(gene_id, barcode)
+					barcode_embeddings.append(cnv_embedding)
+					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+				# TODO: repreat genomic embedding len(barcode_embeddings) times
+				# numpy.tile(genomic_embedding, (*genomic_embedding.shape, len(barcode_embeddings)))
+				yield np.vstack([genomic_embedding, np.vstack(barcode_embeddings)])
+				barcode_embeddings = [cnv_embedding]
+				continue
+			case 'single_gene_barcode':
+					yield np.vstack([genomic_embedding, cnv_embedding])
+			case 'gene_concat':
+					assert gene_id == cnv_gene_id
+					barcode_embeddings.append(cnv_embedding)
+
+	if mode == 'gene_concat':
+		# barcode_embeddings.append(cnv_embedding)
+		print(barcode, '1:', len(barcode_embeddings))
+		yield np.vstack([
+			np.hstack(genomic_embeddings),
+			np.hstack(barcode_embeddings)
+		])
+		barcode_embeddings = []
+
+		# generate all barcode embeddings for remaining barcodes
+		barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
 		for next_barcode, next_cnv_gene_id, next_cnv_embedding in cnv_embedder:
 			if barcode != next_barcode:
+				print("switsching barcode")
 				barcode_embeddings.append(cnv_embedding)
 				yield np.vstack([
 					np.hstack(genomic_embeddings),
@@ -366,6 +338,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 			barcode, cnv_gene_id, cnv_embedding = next_barcode, next_cnv_gene_id, next_cnv_embedding	
 		
 		# handle fence post
+		print("reaching fence post, len(barcode)", len(barcode_embeddings))
 		barcode_embeddings.append(cnv_embedding)
 		yield np.vstack([
 			np.hstack(genomic_embeddings),

@@ -245,18 +245,18 @@ def test_embed_main():
 		'cell-AATCATGTCGATCAGT-1'
 	}
 
-	# # single embedding test case
-	# embedder = embed(
-	# 	fasta_path,
-	# 	overlap_path,
-	# 	epianeu_path,
-	# 	mode='single_gene_barcode',
-	# 	gene_set=test_gene_set,
-	# 	barcode_set=test_barcode_set
-	# )
-	# for _ in range(3):
-	# 	x = next(embedder)
-	# 	assert x.shape == (7, 10_000), "Wrong shape: {},{}".format(*x.shape)
+	# single embedding test case
+	embedder = embed(
+		fasta_path,
+		overlap_path,
+		epianeu_path,
+		mode='single_gene_barcode',
+		gene_set=test_gene_set,
+		barcode_set=test_barcode_set
+	)
+	for _ in range(3):
+		x = next(embedder)
+		assert x.shape == (7, 10_000), "Wrong shape: {},{}".format(*x.shape)
 
 	# gene concat case
 	embedder_2 = embed(
@@ -267,7 +267,8 @@ def test_embed_main():
 		gene_set=test_gene_set,
 		barcode_set=test_barcode_set
 	)
-	for _ in range(3):
+	for i in range(3):
+		print("test:", i)
 		x = next(embedder_2)
 		assert x.shape == (7, 3 * 10_000), "Wrong shape: {},{}".format(*x.shape)
 
