@@ -327,10 +327,14 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 	# sort autosomes on integer index
 	atac_df_auto = atac_df[atac_df['Chromosome'].isin(autosomes)].copy()
 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(uint8)
-	atac_df_auto = atac_df_auto.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
+	atac_df_auto = atac_df_auto.sort_values(
+		by=['Chromosome', 'Start_gene', 'End_gene']
+	)
 	# sort allosomes separately
 	atac_df_allo = atac_df[atac_df['Chromosome'].isin(allosomes)].copy()
-	atac_df_allo = atac_df_allo.sort_values(by=['Chromosome', 'Start_gene', 'End_gene'])
+	atac_df_allo = atac_df_allo.sort_values(
+		by=['Chromosome', 'Start_gene', 'End_gene']
+	)
 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
 	# concat sorted dataframes
 	atac_df = concat([atac_df_auto, atac_df_allo])
@@ -340,10 +344,13 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 	if gene_set is not None:
 		uniq_gene_ids = set(uniq_gene_ids).intersection(gene_set)
 
-	gene_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)][['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
+	gene_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)]\
+		[['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
 
 	# create embedding part generators
-	# TODO: divide into barcode, dependent and barcode independent and create using list of funcitons
+	# TODO: 
+	# * divide into barcode, dependent and barcode independent embedders
+	# * create using list of funcitons
 	dna_embedder = embed_dna(
 		gene_regions=gene_df,
 		embedding_window=(n_upstream, n_downstream),
@@ -379,27 +386,32 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 		genomic_embeddings.append(genomic_embedding)
 
 		barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+		assert gene_id == cnv_gene_id
+		barcode_embeddings.append(cnv_embedding)
 
 		match mode:
 			case 'barcode_channel':
-				# TODO: debug
-				while cnv_gene_id == gene_id:
+				for i in range(1,len(uniq_gene_ids)):
+					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
 					print(gene_id, barcode)
 					barcode_embeddings.append(cnv_embedding)
-					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+					# while cnv_gene_id == gene_id:
 				# TODO: repreat genomic embedding len(barcode_embeddings) times
-				# numpy.tile(genomic_embedding, (*genomic_embedding.shape, len(barcode_embeddings)))
+				# numpy.tile(genomic_embedding, 
+				# (*genomic_embedding.shape, len(barcode_embeddings)))
+				print(barcode, ':', len(barcode_embeddings))
 				yield vstack([genomic_embedding, vstack(barcode_embeddings)])
-				barcode_embeddings = [cnv_embedding]
-				continue
+				barcode_embeddings = []
+				# continue
 			case 'single_gene_barcode':
-					yield vstack([genomic_embedding, cnv_embedding])
+				yield vstack([genomic_embedding, cnv_embedding])
+				barcode_embeddings = []
 			case 'gene_concat':
-					assert gene_id == cnv_gene_id
-					barcode_embeddings.append(cnv_embedding)
+				pass
+					# assert gene_id == cnv_gene_id
+					# barcode_embeddings.append(cnv_embedding)
 
 	if mode == 'gene_concat':
-		# barcode_embeddings.append(cnv_embedding)
 		print(barcode, '1:', len(barcode_embeddings))
 		yield vstack([
 			hstack(genomic_embeddings),
@@ -421,8 +433,10 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 			else:
 				barcode_embeddings.append(cnv_embedding)
 			
-			barcode, cnv_gene_id, cnv_embedding = next_barcode, next_cnv_gene_id, next_cnv_embedding	
-		
+			barcode = next_barcode	
+			cnv_gene_id = next_cnv_gene_id
+			cnv_embedding = next_cnv_embedding	
+
 		# handle fence post
 		print("reaching fence post, len(barcode)", len(barcode_embeddings))
 		barcode_embeddings.append(cnv_embedding)
