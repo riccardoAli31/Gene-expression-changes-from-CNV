@@ -5,8 +5,10 @@ Script for creating embeddings from DNA regions.
 See https://genomebiology.biomedcentral.com/articles/10.1186/s13059-022-02811-x/figures/5 
 """
 
-from numpy import array, ndarray, hstack, vstack, zeros, uint8
-from pandas import DataFrame, Series, read_csv, concat
+from numpy import array, ndarray, hstack, vstack, tile, zeros, uint8
+from numpy import concat as np_concat
+from pandas import DataFrame, Series, read_csv
+from pandas import concat as pd_concat
 from typing import List, Tuple, Union, Set, Generator, Any
 import os
 from ..data import (
@@ -23,10 +25,8 @@ from ..util import relative_idx
 #	- how to handle missing CNV overlaps
 #	- read reference genome from .fasta.tar.gz using import tarfile?
 #	- use data .gtf file for CDS and promoters
-
-# TODO: implement two different modes:
-# - one returning multiple genes concatenated per cell
-# - another returning multiple genes as channels for each gene
+#	* divide into barcode, dependent and barcode independent embedders
+#	* create using list of funcitons
 
 # Possible bugs:
 # - close to chromosomal end -> no epiAneufinder data
@@ -313,7 +313,11 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 	gene_set : Set[str] or None specifiying subset of ENSEMBL gene ids to use
 	barcode_set : Set[str] or None specifying subset of cell barcodes to use
 	mode : str one of ['gene_concat', 'barcode_channel', 'single_gene_barcode']
-		to specify how to combine and return embeddings. Default: 'gene_concat'
+		to specify how to combine and return embeddings. Output shapes:
+		* 'gene_concat': (n_coding_rows, embedding_len * n_genes) per barcode
+		* 'barcode_channel': (n_barcodes, n_coding_rows, embedding_len) per gene
+		* 'single_gene_barcode': (n_coding_rows, embedding_len) per gene - barc.
+		Default: 'gene_concat'
 	pad_dna : bool if pad embedding positions after gene end. Default: True
 	n_upstream : int of embedding length upstream of gene start. Default: 2000
 	n_downstream : int of embedding len. downstram of gene start. Default: 8000
@@ -337,7 +341,7 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 	)
 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
 	# concat sorted dataframes
-	atac_df = concat([atac_df_auto, atac_df_allo])
+	atac_df = pd_concat([atac_df_auto, atac_df_allo])
 	uniq_gene_ids = list(atac_df['gene_id'].unique())
 
 	# apply subsetting by gene_id
@@ -391,28 +395,30 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 
 		match mode:
 			case 'barcode_channel':
-				for i in range(1,len(uniq_gene_ids)):
+				# accumulate all barcode data for this gene
+				for _ in range(1,len(uniq_gene_ids)):
 					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
-					print(gene_id, barcode)
 					barcode_embeddings.append(cnv_embedding)
-					# while cnv_gene_id == gene_id:
-				# TODO: repreat genomic embedding len(barcode_embeddings) times
-				# numpy.tile(genomic_embedding, 
-				# (*genomic_embedding.shape, len(barcode_embeddings)))
-				print(barcode, ':', len(barcode_embeddings))
-				yield vstack([genomic_embedding, vstack(barcode_embeddings)])
+				
+				# repreat genomic embedding for each barcode and concat them
+				genomic_embedding_tile = tile(
+					genomic_embedding, reps=(len(barcode_embeddings),1,1)
+				)
+				barcode_embedding_tile = vstack(barcode_embeddings).reshape(
+						(len(barcode_embeddings), *cnv_embedding.shape)
+					)
+				yield np_concat(
+					[genomic_embedding_tile, barcode_embedding_tile],
+					axis=1
+				)
 				barcode_embeddings = []
-				# continue
 			case 'single_gene_barcode':
 				yield vstack([genomic_embedding, cnv_embedding])
 				barcode_embeddings = []
 			case 'gene_concat':
 				pass
-					# assert gene_id == cnv_gene_id
-					# barcode_embeddings.append(cnv_embedding)
 
 	if mode == 'gene_concat':
-		print(barcode, '1:', len(barcode_embeddings))
 		yield vstack([
 			hstack(genomic_embeddings),
 			hstack(barcode_embeddings)
@@ -423,7 +429,6 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 		barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
 		for next_barcode, next_cnv_gene_id, next_cnv_embedding in cnv_embedder:
 			if barcode != next_barcode:
-				print("switsching barcode")
 				barcode_embeddings.append(cnv_embedding)
 				yield vstack([
 					hstack(genomic_embeddings),
@@ -438,7 +443,6 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 			cnv_embedding = next_cnv_embedding	
 
 		# handle fence post
-		print("reaching fence post, len(barcode)", len(barcode_embeddings))
 		barcode_embeddings.append(cnv_embedding)
 		yield vstack([
 			hstack(genomic_embeddings),
