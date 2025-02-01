@@ -2,8 +2,9 @@ from typing import List, Tuple
 from ..util import interval_overlap
 from pandas import DataFrame
 
-def extract_cnv_overlaps(cnv_df: DataFrame, barcode: str,
-		region: Tuple[str,int,int]) -> List[Tuple[Tuple[int, int],int]]:
+def extract_cnv_overlaps(cnv_df: DataFrame, barcode: str, 
+						 region: Tuple[str,int,int]
+						 ) -> List[Tuple[Tuple[int, int],int]]:
 	"""
 	Extracts all overlaps between rows in the copy number status 
 	data frame and the genomic region of interest (e.g. embedding)
