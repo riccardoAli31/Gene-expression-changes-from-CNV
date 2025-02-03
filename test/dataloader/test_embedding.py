@@ -253,20 +253,22 @@ def test_embed_cnv():
 
 
 def test_embed_main():
-	gft_path='data/Homo_sapiens.GRCh38.113.gtf.gz'
+	# gft_path='data/Homo_sapiens.GRCh38.113.gtf.gz'
 	fasta_path='data/GRCh38.d1.vd1.fa'
 	overlap_path='data/overlap_genes_peaks.tsv'
 	epianeu_path='data/epiAneuFinder_results.tsv'
-	test_gene_set = {
+	test_genes = [
 		'ENSG00000000971',
 		'ENSG00000002587',
 		'ENSG00000002745'
-	}
-	test_barcode_set = {
+	]
+	test_gene_set = set(test_genes)
+	test_barcodes = [
 		'cell-GCGCAATGTTGCGGAT-3',
 		'cell-CTAGTGAGTCACCTAT-3',
 		'cell-AATCATGTCGATCAGT-1'
-	}
+	]
+	test_barcode_set = set(test_barcodes)
 
 	# single embedding test case
 	embedder = embed(
@@ -277,12 +279,15 @@ def test_embed_main():
 		barcode_set=test_barcode_set,
 		mode='single_gene_barcode'
 	)
-	for _ in range(3):
-		x = next(embedder)
-		assert x.shape == (7, 10_000), "Wrong shape: {},{}".format(*x.shape)
+	for i in range(3):
+		barcode_id, gene_id, embedding = next(embedder)
+		assert gene_id == test_genes[0]
+		assert barcode_id == test_barcodes[i]
+		assert embedding.shape == (7, 10_000), \
+			"Wrong shape: {},{}".format(*embedding.shape)
 
 	# gene concat case
-	embedder_2 = embed(
+	embedder = embed(
 		fasta_path,
 		overlap_path,
 		epianeu_path,
@@ -291,9 +296,10 @@ def test_embed_main():
 		mode='gene_concat'
 	)
 	for i in range(3):
-		print("test:", i)
-		x = next(embedder_2)
-		assert x.shape == (7, 3 * 10_000), "Wrong shape: {},{}".format(*x.shape)
+		barcode_id, _, embedding = next(embedder)
+		assert barcode_id == test_barcodes[i]
+		assert embedding.shape == (7, 3 * 10_000),\
+			"Wrong shape: {},{}".format(*embedding.shape)
 
 	# barcode channel case
 	embedder = embed(
@@ -304,6 +310,8 @@ def test_embed_main():
 		barcode_set=test_barcode_set,
 		mode='barcode_channel'
 	)
-	for _ in range(3):
-		x = next(embedder)
-		assert x.shape == (3, 7, 10_000), "Wrong shape: {},{}".format(*x.shape)
+	for i in range(3):
+		_, gene_id, embedding = next(embedder)
+		assert gene_id == test_genes[i]
+		assert embedding.shape == (3, 7, 10_000),\
+			"Wrong shape: {},{}".format(*embedding.shape)
