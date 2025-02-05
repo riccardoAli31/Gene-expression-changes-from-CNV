@@ -96,7 +96,11 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 			peak_end = emb_end
 
 		# sanity check there is an overlap between gene and peak
-		assert peak_start < emb_end and emb_start < peak_end
+		if not (peak_start < emb_end and emb_start < peak_end):
+			print("No peak overlap: peak: {}-{}, embedding:{}-{}".format(
+				peak_start, peak_end, emb_start, emb_end
+			))
+			return atac_embedding
 
 		peak_start = emb_start if peak_start < emb_start else peak_start
 		peak_end = peak_end if peak_end < emb_end else emb_end
@@ -250,8 +254,9 @@ def embed_cnv(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 	cnv_df['seq'] = Series(map(lambda x: x.replace('chr', ''), cnv_df['seq']))
 
 	if barcode_set is not None:
-		assert len(barcode_set.difference(set(cnv_df.columns[4:]))) == 0,\
-			"Barcodes don't match CNV data!"
+		barcode_diff = barcode_set.difference(set(cnv_df.columns[4:]))
+		assert len(barcode_diff) == 0,\
+			"No CNV data for {}".format(",".join(barcode_diff))
 		cnv_df = cnv_df[
 			cnv_df.columns[
 				cnv_df.columns.isin(barcode_set.union({'seq', 'start', 'end'}))
@@ -428,8 +433,10 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 					gene_id,
 					vstack([genomic_embedding, cnv_embedding])
 				)
-				for _ in range(1,len(uniq_gene_ids)):
+				# TODO change if cnv_embedder as no assert on barcode_diff
+				for _ in range(1,len(barcode_set)):
 					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+					assert gene_id == cnv_gene_id
 					yield (
 						barcode,
 						gene_id,
