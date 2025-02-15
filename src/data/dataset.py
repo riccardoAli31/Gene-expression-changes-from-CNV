@@ -3,7 +3,7 @@ from src.dataloader.embedding import embed
 import os
 import pandas as pd
 
-class CopyNumerDNADataset(torch.utils.data.DataSet):
+class CopyNumerDNADataset(torch.utils.data.Dataset):
     """
     Dataset class for DNA, ATAC and CNV data.
     """
