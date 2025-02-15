@@ -2,6 +2,7 @@ import torch
 from src.dataloader.embedding import embed
 import os
 import pandas as pd
+from typing import Union, Tuple, List
 
 class CopyNumerDNADataset(torch.utils.data.Dataset):
     """
