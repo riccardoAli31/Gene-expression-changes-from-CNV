@@ -27,6 +27,9 @@ from ..util import relative_idx
 #	- use data .gtf file for CDS and promoters
 #	* divide into barcode, dependent and barcode independent embedders
 #	* create using list of funcitons
+#	* use pyranges for overlap computation https://pyranges.readthedocs.io/en/latest/autoapi/pyranges/index.html
+#	* cite pyranges https://academic.oup.com/bioinformatics/article/36/3/918/5543103
+#	* use ICLR conference paper template for report
 
 # Possible bugs:
 # - close to chromosomal end -> no epiAneufinder data
