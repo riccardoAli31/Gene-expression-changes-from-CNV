@@ -30,5 +30,6 @@ Temporary Items
 .ipynb_checkpoints
 data/*
 out/
-log/
+log/*
+!log/meeting_log.md
 report/
