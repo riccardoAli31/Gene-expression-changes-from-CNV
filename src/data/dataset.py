@@ -20,14 +20,14 @@ class CopyNumerDNADataset(torch.utils.data.DataSet):
         """
         super().__init__(*args, **kwargs)
 
-        self.root_path = root
+        self.root_path = os.path.join(root, embedding_mode)
 
-        if not os.path.isdir(root) or force_recompute:
+        if not os.path.isdir(self.root_path) or force_recompute:
             fasta_path = kwargs.get('fasta_path')
             atac_path = kwargs.get('atac_path')
             cnv_path = kwargs.get('cnv_path')
-            if not os.path.isdir(root):
-                os.mkdir(root)
+            if not os.path.isdir(self.root_path):
+                os.mkdir(self.root_path)
 
             embedder = embed(
                 fasta_path,
@@ -44,21 +44,21 @@ class CopyNumerDNADataset(torch.utils.data.DataSet):
                         torch.save(
                             torch.from_numpy(embedding), 
                             os.path.join(
-                                [root, embedding_mode, barcode, gene_id + '.pt']
+                                [self.root_path, barcode, gene_id + '.pt']
                             )
                         )
                     case 'gene_concat':
                         torch.save(
                             torch.from_numpy(embedding), 
                             os.path.join(
-                                [root, embedding_mode, barcode, + '.pt']
+                                [self.root_path, barcode, + '.pt']
                             )
                         )
                     case 'barcode_channel':
                         torch.save(
                             torch.from_numpy(embedding), 
                             os.path.join(
-                                [root, embedding_mode, gene_id + '.pt']
+                                [self.root_path, gene_id + '.pt']
                             )
                         )
         
@@ -70,7 +70,7 @@ class CopyNumerDNADataset(torch.utils.data.DataSet):
                     {
                         'file_path':
                         [
-                            os.path.join([root, embedding_mode, cell + '.pt'])
+                            os.path.join([self.root_path, cell + '.pt'])
                             for cell in barcode_ids
                         ]
                     }
@@ -80,7 +80,7 @@ class CopyNumerDNADataset(torch.utils.data.DataSet):
                     {
                         'file_path':
                         [
-                            os.path.join([root, embedding_mode, gene + '.pt'])
+                            os.path.join([self.root_path, gene + '.pt'])
                             for gene in gene_ids
                         ]
                     }
@@ -91,7 +91,7 @@ class CopyNumerDNADataset(torch.utils.data.DataSet):
                         'file_path':
                         [
                             os.path.join(
-                                [root, embedding_mode, barcode, gene + '.pt']
+                                [self.root_path, barcode, gene + '.pt']
                             ) 
                             for gene in gene_ids
                         ]
@@ -105,22 +105,17 @@ class CopyNumerDNADataset(torch.utils.data.DataSet):
         self.files_df = files_df
 
     @staticmethod
-    def _get_embedding(file_path_df, idx, dna=True, atac=True, cnv=True):
+    def _subset_embedding_rows(n_rows: int, dna=True, atac=True, cnv=True):
         """
-        Loads embeddings from file and filters rows.
-
-        file_path_df : pandas.DataFrame with column 'file_path'
-        ids : int of the embedding to load
+        Create a list to filter rows of an embedding.
+        
+        n_rows : int of number of rows of an embedding tensor
         dna : bool if include DNA sequence coding rows, that is rows 0 to 3
         atac : bool if include open chromatin row (4)
         cnv : bool if include CNV encoding rows (5 and 6)
         """
 
-        # load embedding
-        embedding = torch.load(file_path_df.loc[idx]['file_path'])
-
-        # filter rows to select
-        rows = []
+        rows = list()
         if dna:
             rows.extend([0, 1, 2, 3])
         if atac:
@@ -129,9 +124,27 @@ class CopyNumerDNADataset(torch.utils.data.DataSet):
             rows.extend([5, 6])
         
         # sanity check rows are valid
-        # assert all(map(lambda x: x < embedding.shape[0], rows))
+        assert all(map(lambda x: x < n_rows, rows))
 
-        return embedding[rows,:]
+        return rows
+
+    @staticmethod
+    def _get_embedding(file_path_df, idx, rows=Union[List[int], None]):
+        """
+        Loads embeddings from file and filters rows.
+
+        file_path_df : pandas.DataFrame with column 'file_path'
+        idx : int of the embedding to load
+        rows : None or List[int] of row indices to include from embedding. This
+            parameter is not sanity checked. Make sure to create this list with
+            the _subset_embedding_rows() function.
+        """
+
+        embedding = torch.load(file_path_df.loc[idx]['file_path'])
+
+        if rows is not None:
+            return embedding[rows,:]
+        return embedding
 
     @staticmethod
     def _get_grund_truth_label(file_path_df, idx):
