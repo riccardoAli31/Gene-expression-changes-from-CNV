@@ -1,6 +1,6 @@
 import torch
 from src.dataloader.embedding import embed
-import os
+from pathlib import Path
 import pandas as pd
 from typing import Union, Tuple, List
 
@@ -26,18 +26,20 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
             id of the respective data point while 'expression_count' and
             'classification' are the regression and classification targets. 
         """
-        super().__init__(*args, **kwargs)
 
-        self.root_path = os.path.join(root, embedding_mode)
+        self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
 
-        barcode_ids = list(data_df['barcode'].unique())
-        gene_ids = list(data_df['gene_id'].unique())
+        recompute = force_recompute or not self.root_path.exists()
 
-        if not os.path.isdir(self.root_path):
-            os.mkdir(self.root_path)
+        barcode_ids = set(data_df['barcode'])
+        gene_ids = set(data_df['gene_id'])
 
-        if not os.path.isdir(self.root_path) or force_recompute:
+        if not self.root_path.exists():
+            self.root_path.mkdir(parents=True)
+
+        print(recompute)
+        if recompute:
             fasta_path = kwargs.get('fasta_path')
             atac_path = kwargs.get('atac_path')
             cnv_path = kwargs.get('cnv_path')
@@ -51,54 +53,62 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
                 mode=embedding_mode
             )
 
+            file_paths = list()
+            i = 0
             for barcode, gene_id, embedding in embedder:
+                i += 1
                 match embedding_mode:
                     case 'single_gene_barcode':
                         torch.save(
                             torch.from_numpy(embedding), 
-                            os.path.join(
-                                [self.root_path, barcode, gene_id + '.pt']
-                            )
+                            self.root_path / barcode / gene_id + '.pt'
+                        )
+                        file_paths.append(
+                            self.root_path / barcode / gene_id + '.pt'
                         )
                     case 'gene_concat':
                         torch.save(
                             torch.from_numpy(embedding), 
-                            os.path.join(
-                                [self.root_path, barcode, + '.pt']
-                            )
+                            self.root_path / barcode + '.pt'
+                        )
+                        file_paths.append(
+                            self.root_path / barcode / gene_id + '.pt'
                         )
                     case 'barcode_channel':
                         torch.save(
                             torch.from_numpy(embedding), 
-                            os.path.join(
-                                [self.root_path, gene_id + '.pt']
-                            )
+                            self.root_path / gene_id + '.pt'
                         )
+                        file_paths.append(
+                            self.root_path / barcode / gene_id + '.pt'
+                        )
+            print(i)
         
-        # create table with files
-        match embedding_mode:
-            case 'gene_concat':
-                self.data_df['embedding_path'] = [
-                            os.path.join([self.root_path, cell + '.pt'])
-                            for cell in barcode_ids
-                        ]
-            case 'barcode_channel':
-                self.data_df['embedding_path'] = [
-                            os.path.join([self.root_path, gene + '.pt'])
-                            for gene in gene_ids
-                        ]
-            case 'single_gene_barcode':
-                self.data_df['embedding_path'] = [
-                            os.path.join(
-                                [self.root_path, barcode, gene + '.pt']
-                            ) 
-                            for gene in gene_ids
-                        ]
+            print(len(file_paths))
+            print(self.data_df.shape)
+            self.data_df['embedding_path'] = file_paths
         
-        # TODO: 
-        # * add labels
-        # * pre-load embeddings from file to buffer I/O time
-        # file size of one single_gene_barcode matrix: 561463 bytes
+        # # create table with files
+        # match embedding_mode:
+        #     case 'single_gene_barcode':
+        #         self.data_df['embedding_path'] = [
+        #                     self.root_path / barcode / gene + '.pt'
+        #                     for gene in gene_ids
+        #                 ]
+        #     case 'gene_concat':
+        #         self.data_df['embedding_path'] = [
+        #                     self.root_path / cell + '.pt'
+        #                     for cell in barcode_ids
+        #                 ]
+        #     case 'barcode_channel':
+        #         self.data_df['embedding_path'] = [
+        #                     self.root_path / gene + '.pt'
+        #                     for gene in gene_ids
+        #                 ]        
+        # # TODO: 
+        # # * add labels
+        # # * pre-load embeddings from file to buffer I/O time
+        # # file size of one single_gene_barcode matrix: 561463 bytes
 
     @staticmethod
     def _subset_embedding_rows(n_rows: int, dna=True, atac=True, cnv=True):
