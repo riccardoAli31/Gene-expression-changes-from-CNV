@@ -9,8 +9,8 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
     Dataset class for DNA, ATAC and CNV data.
     """
 
-    def __init__(self, root, barcode_ids, gene_ids, *args,
-                 force_recompute=False, embedding_mode='gene_concat',
+    def __init__(self, root, data_df: pd.DataFrame, *args,
+                 force_recompute=False, embedding_mode='single_gene_barcode',
                  **kwargs):
         """
         Initialization funciton.
@@ -18,17 +18,29 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
         * fasta_path: str as path to reference genome fasta file
         * atac_path: str as path to peaks file from ATAC-seq
         * cnv_path: str as path to EpiAneufinder results
+
+        root : str as data root path
+        data_df : pandas.DataFrame with columns:
+            'barcode', 'gene_id', 'expression_count', 'classification'
+            where 'barcode' and 'gene_id' represent the cell barcode and ENSEMBL
+            id of the respective data point while 'expression_count' and
+            'classification' are the regression and classification targets. 
         """
         super().__init__(*args, **kwargs)
 
         self.root_path = os.path.join(root, embedding_mode)
+        self.data_df = data_df
+
+        barcode_ids = list(data_df['barcode'].unique())
+        gene_ids = list(data_df['gene_id'].unique())
+
+        if not os.path.isdir(self.root_path):
+            os.mkdir(self.root_path)
 
         if not os.path.isdir(self.root_path) or force_recompute:
             fasta_path = kwargs.get('fasta_path')
             atac_path = kwargs.get('atac_path')
             cnv_path = kwargs.get('cnv_path')
-            if not os.path.isdir(self.root_path):
-                os.mkdir(self.root_path)
 
             embedder = embed(
                 fasta_path,
@@ -64,46 +76,29 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
                         )
         
         # create table with files
-        files_df = None
         match embedding_mode:
             case 'gene_concat':
-                files_df = pd.DataFrame(
-                    {
-                        'file_path':
-                        [
+                self.data_df['embedding_path'] = [
                             os.path.join([self.root_path, cell + '.pt'])
                             for cell in barcode_ids
                         ]
-                    }
-                )
             case 'barcode_channel':
-                files_df = pd.DataFrame(
-                    {
-                        'file_path':
-                        [
+                self.data_df['embedding_path'] = [
                             os.path.join([self.root_path, gene + '.pt'])
                             for gene in gene_ids
                         ]
-                    }
-                )
             case 'single_gene_barcode':
-                files_df = pd.DataFrame(
-                    {
-                        'file_path':
-                        [
+                self.data_df['embedding_path'] = [
                             os.path.join(
                                 [self.root_path, barcode, gene + '.pt']
                             ) 
                             for gene in gene_ids
                         ]
-                    }
-                )
         
         # TODO: 
         # * add labels
         # * pre-load embeddings from file to buffer I/O time
         # file size of one single_gene_barcode matrix: 561463 bytes
-        self.files_df = files_df
 
     @staticmethod
     def _subset_embedding_rows(n_rows: int, dna=True, atac=True, cnv=True):
@@ -130,41 +125,56 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
         return rows
 
     @staticmethod
-    def _get_embedding(file_path_df, idx, rows=Union[List[int], None]):
+    def _get_embedding(data_df, idx, rows=Union[List[int], None]):
         """
         Loads embeddings from file and filters rows.
 
-        file_path_df : pandas.DataFrame with column 'file_path'
+        data_df : pandas.DataFrame with column 'embedding_path'
         idx : int of the embedding to load
         rows : None or List[int] of row indices to include from embedding. This
             parameter is not sanity checked. Make sure to create this list with
             the _subset_embedding_rows() function.
         """
 
-        embedding = torch.load(file_path_df.loc[idx]['file_path'])
+        embedding = torch.load(data_df.loc[idx]['embedding_path'])
 
         if rows is not None:
             return embedding[rows,:]
         return embedding
 
     @staticmethod
-    def _get_grund_truth_label(file_path_df, idx):
-        # TODO return ground truth gene expression classification for 
-        pass
+    def _get_grund_truth_label(data_df: pd.DataFrame, idx: int,
+                               type='classification'):
+        """
+        Return the ground truth respective to regression or classification.
+
+        data_df : pandas.DataFrame with columns:
+            'barcode', 'gene_id', 'expression_count', 'classification'
+            where 'barcode' and 'gene_id' represent the cell barcode and ENSEMBL
+            id of the respective data point while 'expression_count' and
+            'classification' are the regression and classification targets.
+        idx : int of index in data_df
+        type : str, one of 'regression' or 'classification'
+        """
+        match type:
+            case 'classification':
+                return data_df.loc[idx]['classification']
+            case 'expression_count':
+                return data_df.loc[idx]['expression_count']
 
     def __len__(self):
-        return self.files_df.shape[0]
+        return self.data_df.shape[0]
 
     def __getitem__(self, idx, **kwargs):
         return {
-            'embedding': self._get_embedding(idx, **kwargs),
-            'label': self._get_grund_truth_label(idx)
+            'embedding': self._get_embedding(self.data_df, idx, **kwargs),
+            'label': self._get_grund_truth_label(self.data_df, idx)
         }
 
     def split(self, train, test, val=None):
         """
         Function to create training, validation and test splits.
         """
-
+        # TODO: write function to make test/val/train splits
         pass
                 
