@@ -338,7 +338,9 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 		modes all barcodes or genes are represented in the returned embedding.
 	"""
 
-	assert all(map(os.path.isfile, [fasta_path, atac_path, cnv_path]))
+	assert os.path.isfile(fasta_path), ".fasta not found: {}".format(fasta_path)
+	assert os.path.isfile(atac_path), "Overlaps not found: {}".format(atac_path)
+	assert os.path.isfile(cnv_path), "CNV file not found: {}".format(cnv_path)
 
 	# load open chromatin peaks
 	atac_df = read_csv(atac_path, sep='\t')
