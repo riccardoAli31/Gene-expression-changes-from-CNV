@@ -34,11 +34,13 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
 
         barcode_ids = set(data_df['barcode'])
         gene_ids = set(data_df['gene_id'])
+        print(barcode_ids)
+        print(gene_ids)
 
         if not self.root_path.exists():
             self.root_path.mkdir(parents=True)
 
-        print(recompute)
+        print('Recomputing embeddings: ', recompute)
         if recompute:
             fasta_path = kwargs.get('fasta_path')
             atac_path = kwargs.get('atac_path')
@@ -56,6 +58,9 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
             file_paths = list()
             i = 0
             for barcode, gene_id, embedding in embedder:
+                print('{} embedding for {}, {}'.format(
+                    embedding.shape, barcode, gene_id
+                ))
                 i += 1
                 match embedding_mode:
                     case 'single_gene_barcode':
