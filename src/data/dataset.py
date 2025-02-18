@@ -1,5 +1,5 @@
 import torch
-from src.dataloader.embedding import embed
+from data.embedding import embed
 from pathlib import Path
 import pandas as pd
 from typing import Union, Tuple, List

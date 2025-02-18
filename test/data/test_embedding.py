@@ -1,6 +1,6 @@
 from numpy import array, array_equal, zeros, uint8
 from pandas import DataFrame, read_csv, concat
-from src.dataloader.embedding import (
+from data.embedding import (
 	encode_dna_seq,
 	encode_open_chromatin,
 	encode_cnv_status,

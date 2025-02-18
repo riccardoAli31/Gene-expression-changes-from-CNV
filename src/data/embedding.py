@@ -12,7 +12,7 @@ from pandas import concat as pd_concat
 from typing import List, Tuple, Dict, Union, Set, Generator, Any
 from tqdm import tqdm
 import os
-from ..data import (
+from . import (
     allosomes, 
     autosomes,
     extract_cnv_overlaps,
