@@ -9,7 +9,8 @@ from numpy import array, ndarray, hstack, vstack, tile, zeros, uint8
 from numpy import concat as np_concat
 from pandas import DataFrame, Series, read_csv
 from pandas import concat as pd_concat
-from typing import List, Tuple, Union, Set, Generator, Any
+from typing import List, Tuple, Dict, Union, Set, Generator, Any
+from tqdm import tqdm
 import os
 from ..data import (
     allosomes, 
@@ -229,9 +230,8 @@ def embed_atac(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 		)
 
 
-def embed_cnv(gene_regions: DataFrame, embedding_window: Tuple[int,int],
-			  cnv_path: str, mode='gene_concat',
-			  barcode_set: Union[Set[str], None]=None 
+def embed_cnv(gene_regions: DataFrame, cnv_df: DataFrame, gene_start: int,
+			  embedding_window: Tuple[int,int], mode='gene_concat'
 			  ) -> Generator[Tuple[str,int,int,ndarray],Any,Any]:
 	"""
 	CNV embedding generator.
@@ -245,31 +245,10 @@ def embed_cnv(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 		embedding generation modus. Default: 'gene_concat'
 	barcode_set : {str} or None specifying cell barcode subset to use
 	"""
+	# TODO: adapt documentation
 
 	assert mode in embedding_modes
 	emb_upstream, emb_downstream = embedding_window
-
-	# load EpiAneufinder result table 
-	cnv_df = read_csv(cnv_path, sep=' ')
-	cnv_df = cnv_df.sort_values(by=['seq', 'start', 'end'])
-	assert all(cnv_df.columns[1:4] == ['seq', 'start', 'end']),\
-		"Column name Mismatch, please insert 'idx ' to the first line."
-	cnv_df['seq'] = Series(map(lambda x: x.replace('chr', ''), cnv_df['seq']))
-
-	if barcode_set is not None:
-		barcode_diff = barcode_set.difference(set(cnv_df.columns[4:]))
-		# Print warning for all barcodes with no CNV data
-		if len(barcode_diff) == 0:
-			print("[Warning] No CNV data for {}".format(",".join(barcode_diff)))
-
-		# update barcode set to only work on intersection
-		barcode_set = set(cnv_df.columns[4:]).intersection(barcode_set)
-
-		cnv_df = cnv_df[
-			cnv_df.columns[
-				cnv_df.columns.isin(barcode_set.union({'seq', 'start', 'end'}))
-			]
-		]
 
 	match mode:
 		case 'gene_concat':
@@ -291,25 +270,25 @@ def embed_cnv(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 					)
 		
 		case 'barcode_channel' | 'single_gene_barcode':
-			for _, (chrom, gen_start, _, gen_id) in gene_regions.iterrows():
-				for barcode in cnv_df.columns[cnv_df.columns.isin(barcode_set)]:
-					emb_start = gen_start - emb_upstream
-					emb_end = gen_start + emb_downstream
-					yield (
-						barcode,
-						gen_id,
-						encode_cnv_status(
-							(emb_start, emb_end),
-							extract_cnv_overlaps(
-								cnv_df=cnv_df,
-								barcode=barcode,
-								region=(chrom, emb_start, emb_end)
-							)
+			for barcode in cnv_df.columns[3:]:
+				emb_start = gene_start - emb_upstream
+				emb_end = gene_start + emb_downstream
+				yield (
+					barcode,
+					gen_id,
+					encode_cnv_status(
+						(emb_start, emb_end),
+						extract_cnv_overlaps(
+							cnv_df=cnv_df,
+							barcode=barcode,
+							region=(chrom, emb_start, emb_end)
 						)
 					)
+				)
 	
 
 def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
+		  barcode_to_genes: Union[Dict[str, List[str]], None],
 		  barcode_set: Union[Set[str], None], mode='gene_concat', pad_dna=True,
 		  n_upstream=2000, n_downstream=8000, gtf_path=None
 		  ) -> Generator[Tuple[str,str,ndarray],Any,Any]:
@@ -342,11 +321,13 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 		'all genes' ('gene_concat'). This is due to the fact, that in these
 		modes all barcodes or genes are represented in the returned embedding.
 	"""
+	# TODO: update documentation
 
 	assert os.path.isfile(fasta_path), ".fasta not found: {}".format(fasta_path)
 	assert os.path.isfile(atac_path), "Overlaps not found: {}".format(atac_path)
 	assert os.path.isfile(cnv_path), "CNV file not found: {}".format(cnv_path)
 
+	# ==== OPEN CHROMATIN ====
 	# load open chromatin peaks
 	atac_df = read_csv(atac_path, sep='\t')
 	# sort autosomes on integer index
@@ -363,14 +344,71 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
 	# concat sorted dataframes
 	atac_df = pd_concat([atac_df_auto, atac_df_allo])
-	uniq_gene_ids = list(atac_df['gene_id'].unique())
+	uniq_gene_ids = set(atac_df['gene_id'].unique())
 
 	# apply subsetting by gene_id
 	if gene_set is not None:
-		uniq_gene_ids = set(uniq_gene_ids).intersection(gene_set)
+		uniq_gene_ids = uniq_gene_ids.intersection(gene_set)
+
+	# only select genes that are present for mapping genes to barcodes
+	gene_to_barcodes = {
+		g: b for g, b in gene_to_barcodes.items() if g in uniq_gene_ids
+	}
 
 	gene_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)]\
 		[['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
+	print('Using {} genes:'.format(len(uniq_gene_ids)))
+	print(','.join(uniq_gene_ids))
+	
+	# ==== CNV ====
+	# load EpiAneufinder result table 
+	cnv_df = read_csv(cnv_path, sep=' ')
+	assert all(cnv_df.columns[1:4] == ['seq', 'start', 'end']),\
+		"Column name Mismatch, please prepend 'idx ' to the first line."
+	
+	# define unique barcodes to use for embedding computation
+	uniq_barcode_ids = set(cnv_df.columns[4:])
+	if barcode_set is not None:
+		barcode_diff = barcode_set.difference(uniq_barcode_ids)
+		if len(barcode_diff) > 0:
+			print("[Warning] No CNV data for {}".format(",".join(barcode_diff)))
+		uniq_barcode_ids = uniq_barcode_ids.intersection(barcode_set)
+
+	# remove not needed barcodes
+	cnv_df = cnv_df[
+		cnv_df.columns[
+			cnv_df.columns.isin(uniq_barcode_ids.union({'seq', 'start', 'end'}))
+		]
+	]
+	print('Using {} barcodes:'.format(len(uniq_barcode_ids)))
+	print(','.join(uniq_barcode_ids))
+
+	cnv_df = cnv_df.sort_values(by=['seq', 'start', 'end'])
+	cnv_df['seq'] = Series(map(lambda x: x.replace('chr', ''), cnv_df['seq']))
+
+	# ==== Iteration Mapping ====s
+	# reshape barcode -> gene_ids dict to gene_id -> barcode dict
+	gene_to_barcodes = dict()
+	n_iter = 0
+	if barcode_to_genes is not None:
+		n_iter = sum(map(len, barcode_to_genes.values()))
+		print("Iterating over barcode -> genes mapping")
+		iter_barcode_set = set(barcode_to_genes.keys())
+		uniq_barcode_ids = uniq_barcode_ids.intersection(iter_barcode_set)
+		iter_gene_set = {
+			gene for vals in barcode_to_genes.values() for gene in vals
+		}
+		uniq_gene_ids = uniq_gene_ids.intersection(iter_gene_set)
+		# create a mapping from gene to barcode to serve for iteration later
+		gene_to_barcodes = {gene: [] for gene in gene_set}
+		# TODO: use boolean map to encode barcodes per gene for saving memory
+		for cnv_barcode, genes in barcode_to_genes.items():
+			for gene in genes:
+				gene_to_barcodes[gene].append(cnv_barcode)
+	else:
+		print("Iterating over all possible combinations of barcodes with genes")
+		n_iter = len(uniq_barcode_ids) * len(uniq_gene_ids)
+		gene_to_barcodes = {gene: uniq_barcode_ids for gene in uniq_gene_ids}
 
 	# create embedding part generators
 	# TODO: 
@@ -387,6 +425,7 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 		embedding_window=(n_upstream, n_downstream),
 		atac_df=atac_df
 	)
+	# TODO: adapt CNV embedder
 	cnv_embedder = embed_cnv(
 		gene_regions=gene_df,
 		embedding_window=(n_upstream, n_downstream),
@@ -397,8 +436,14 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 
 	genomic_embeddings = []
 	barcode_embeddings = []
-	# barcode_embeddings.append(cnv_embedding)
-	for _, (chrom, gene_start, gene_end, gene_id) in gene_df.iterrows():
+	i = 0
+	genomic_iterator = tqdm(
+		gene_df.iterrows(),
+		desc='Computing embeddings for gene #{} in genomic order'.format(i),
+		total=n_iter,
+		ncols=70
+	)
+	for i, (_, (chrom, gene_start, gene_end, gene_id)) in genomic_iterator:
 		
 		_, _, _, dna_embedding = next(dna_embedder)
 		_, _, _, atac_embedding = next(atac_embedder)
@@ -410,15 +455,18 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 
 		genomic_embeddings.append(genomic_embedding)
 
-		barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+		cnv_barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
 		assert gene_id == cnv_gene_id
 		barcode_embeddings.append(cnv_embedding)
 
 		match mode:
 			case 'barcode_channel':
 				# accumulate all barcode data for this gene
-				for _ in range(1,len(uniq_gene_ids)):
-					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+				for barcode in list(gene_to_barcodes[gene_id])[1:]:
+					cnv_barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+					assert barcode == cnv_barcode, "{} != {}".format(
+						barcode, cnv_barcode
+					)
 					barcode_embeddings.append(cnv_embedding)
 				
 				# repreat genomic embedding for each barcode and concat them
@@ -439,19 +487,19 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 				barcode_embeddings = []
 			case 'single_gene_barcode':
 				yield (
-					barcode,
+					cnv_barcode,
 					gene_id,
 					vstack([genomic_embedding, cnv_embedding])
 				)
 				# TODO change if cnv_embedder as no assert on barcode_diff
-				for _ in range(1,len(barcode_set)):
-					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
-					assert gene_id == cnv_gene_id,\
-						"{} != {} for barcode {}".format(
-							gene_id, cnv_gene_id, barcode
+				for barcode in list(gene_to_barcodes[gene_id])[1:]:
+					cnv_barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+					assert gene_id == cnv_gene_id and barcode == cnv_barcode,\
+						"gene {} ?= (CNV) {} for barcode {} ?= (CNV) {}".format(
+							gene_id, cnv_gene_id, barcode, cnv_barcode
 						)
 					yield (
-						barcode,
+						cnv_barcode,
 						gene_id,
 						vstack([genomic_embedding, cnv_embedding])
 					)
@@ -461,7 +509,7 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 
 	if mode == 'gene_concat':
 		yield (
-			barcode,
+			cnv_barcode,
 			'all_genes',
 			vstack([
 				hstack(genomic_embeddings),
@@ -471,12 +519,12 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 		barcode_embeddings = []
 
 		# generate all barcode embeddings for remaining barcodes
-		barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
-		for next_barcode, next_cnv_gene_id, next_cnv_embedding in cnv_embedder:
-			if barcode != next_barcode:
+		cnv_barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
+		for next_cnv_barcode, next_cnv_gene_id, next_cnv_embedding in cnv_embedder:
+			if cnv_barcode != next_cnv_barcode:
 				barcode_embeddings.append(cnv_embedding)
 				yield (
-					barcode,
+					cnv_barcode,
 					'all_genes',
 					vstack([
 						hstack(genomic_embeddings),
@@ -487,14 +535,14 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 			else:
 				barcode_embeddings.append(cnv_embedding)
 			
-			barcode = next_barcode	
+			cnv_barcode = next_cnv_barcode	
 			cnv_gene_id = next_cnv_gene_id
 			cnv_embedding = next_cnv_embedding	
 
 		# handle fence post
 		barcode_embeddings.append(cnv_embedding)
 		yield (
-			barcode,
+			cnv_barcode,
 			'all_genes',
 			vstack([
 				hstack(genomic_embeddings),
