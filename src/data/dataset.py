@@ -3,6 +3,12 @@ from src.dataloader.embedding import embed
 from pathlib import Path
 import pandas as pd
 from typing import Union, Tuple, List
+from tqdm import tqdm
+
+
+def create_tqdm_bar(iterable, total, desc):
+    return tqdm(enumerate(iterable),total=total, ncols=150, desc=desc)
+
 
 class CopyNumerDNADataset(torch.utils.data.Dataset):
     """
@@ -11,7 +17,7 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
 
     def __init__(self, root, data_df: pd.DataFrame, *args,
                  force_recompute=False, embedding_mode='single_gene_barcode',
-                 **kwargs):
+                 verbose=True, **kwargs):
         """
         Initialization funciton.
         Computes embeddings from raw data, if needed. In this case use kwargs:
@@ -34,8 +40,11 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
 
         barcode_ids = set(data_df['barcode'])
         gene_ids = set(data_df['gene_id'])
-        print(barcode_ids)
-        print(gene_ids)
+        if verbose:
+            print('Using {} barcode IDs:'.format(len(barcode_ids)))
+            print(','.join(barcode_ids))
+            print('Using {} genes IDs:'.format(len(gene_ids)))
+            print(','.join(gene_ids))
 
         if not self.root_path.exists():
             self.root_path.mkdir(parents=True)
@@ -57,38 +66,55 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
 
             file_paths = list()
             i = 0
-            for barcode, gene_id, embedding in embedder:
-                print('{} embedding for {}, {}'.format(
-                    embedding.shape, barcode, gene_id
+            # TODO: make case dependent
+            n_embeddings = len(gene_ids) * len(barcode_ids)
+            for i, (barcode, gene_id, embedding) in create_tqdm_bar(
+                embedder,
+                total=n_embeddings,
+                desc=f'Computing embedding [{i + 1}/{n_embeddings}]'
+            ):
+                print('{}: {} embedding for {}, {}'.format(
+                    i, embedding.shape, barcode, gene_id
                 ))
                 i += 1
                 match embedding_mode:
                     case 'single_gene_barcode':
+                        file_dir = self.root_path / barcode
+                        if not file_dir.exists():
+                            file_dir.mkdir(parents=True)
+                        
                         torch.save(
                             torch.from_numpy(embedding), 
-                            self.root_path / barcode / gene_id + '.pt'
+                            file_dir / (gene_id + '.pt')
                         )
                         file_paths.append(
-                            self.root_path / barcode / gene_id + '.pt'
+                            file_dir / (gene_id + '.pt')
                         )
                     case 'gene_concat':
+                        file_dir = self.root_path
+                        if not file_dir.exists():
+                            file_dir.mkdir(parents=True)
+                        
                         torch.save(
                             torch.from_numpy(embedding), 
-                            self.root_path / barcode + '.pt'
+                            file_dir / (barcode + '.pt')
                         )
                         file_paths.append(
-                            self.root_path / barcode / gene_id + '.pt'
+                            file_dir / (barcode + '.pt')
                         )
                     case 'barcode_channel':
+                        file_dir = self.root_path / barcode
+                        if not file_dir.exists():
+                            file_dir.mkdir(parents=True)
+
                         torch.save(
                             torch.from_numpy(embedding), 
-                            self.root_path / gene_id + '.pt'
+                            file_dir / (gene_id + '.pt')
                         )
                         file_paths.append(
-                            self.root_path / barcode / gene_id + '.pt'
+                            file_dir / (gene_id + '.pt')
                         )
-            print(i)
-        
+
             print(len(file_paths))
             print(self.data_df.shape)
             self.data_df['embedding_path'] = file_paths
