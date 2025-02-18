@@ -258,8 +258,13 @@ def embed_cnv(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 
 	if barcode_set is not None:
 		barcode_diff = barcode_set.difference(set(cnv_df.columns[4:]))
-		assert len(barcode_diff) == 0,\
-			"No CNV data for {}".format(",".join(barcode_diff))
+		# Print warning for all barcodes with no CNV data
+		if len(barcode_diff) == 0:
+			print("[Warning] No CNV data for {}".format(",".join(barcode_diff)))
+
+		# update barcode set to only work on intersection
+		barcode_set = set(cnv_df.columns[4:]).intersection(barcode_set)
+
 		cnv_df = cnv_df[
 			cnv_df.columns[
 				cnv_df.columns.isin(barcode_set.union({'seq', 'start', 'end'}))
@@ -441,7 +446,10 @@ def embed(fasta_path, atac_path, cnv_path, gene_set: Union[Set[str], None],
 				# TODO change if cnv_embedder as no assert on barcode_diff
 				for _ in range(1,len(barcode_set)):
 					barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
-					assert gene_id == cnv_gene_id
+					assert gene_id == cnv_gene_id,\
+						"{} != {} for barcode {}".format(
+							gene_id, cnv_gene_id, barcode
+						)
 					yield (
 						barcode,
 						gene_id,
