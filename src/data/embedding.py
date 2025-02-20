@@ -389,10 +389,11 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	# ==== Iteration Mapping ====s
 	# reshape barcode -> gene_ids dict to gene_id -> barcode dict
 	gene_to_barcodes = dict()
+	# TODO: n_iter depending on mode
 	n_iter = 0
 	if barcode_to_genes is not None:
 		n_iter = sum(map(len, barcode_to_genes.values()))
-		print("Iterating over barcode -> genes mapping")
+		print("Iterating over custom barcode to genes mapping")
 		iter_barcode_set = set(barcode_to_genes.keys())
 		uniq_barcodes = uniq_barcodes.intersection(iter_barcode_set)
 		iter_gene_set = {
@@ -428,6 +429,9 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	print('Using {} genes:'.format(len(uniq_gene_ids)))
 	print(','.join(uniq_gene_ids))
 
+	# TODO calculating expected # embeddings
+	# match case for n_iter here
+
 	# create embedding part generators
 	# TODO: 
 	# * divide into barcode, dependent and barcode independent embedders
@@ -455,10 +459,12 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 
 	genomic_embeddings = []
 	barcode_embeddings = []
-	i = 0
+	chrom, gene_start, gene_end = 0, 0, 0
 	genomic_iterator = tqdm(
 		gene_df.iterrows(),
-		desc='Computing embeddings for gene #{} in genomic order'.format(i),
+		desc='Computing embeddings. (currently at chr{}:{}-{})'.format(
+			chrom, gene_start, gene_end
+		),
 		total=n_iter,
 		ncols=150
 	)
@@ -560,7 +566,12 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 				hstack(barcode_embeddings)
 			])
 		)
+
 		barcode_embeddings = []
+
+		# stop iterating here, if there was only one barcode
+		if len(uniq_barcodes) == 1:
+			return
 
 		# generate all barcode embeddings for remaining barcodes
 		cnv_barcode, cnv_gene_id, cnv_embedding = next(cnv_embedder)
