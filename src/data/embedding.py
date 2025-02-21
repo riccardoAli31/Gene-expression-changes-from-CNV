@@ -490,7 +490,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		gene_df.iterrows(),
 		desc='[embed]: Computing embeddings',
 		total=n_embeddings,
-		ncols=70
+		ncols=120
 	)
 	for i, (chrom, gene_start, gene_end, gene_id) in genomic_iterator:
 		
