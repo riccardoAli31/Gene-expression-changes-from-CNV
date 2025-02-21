@@ -488,7 +488,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	barcode_embeddings = []
 	genomic_iterator = tqdm(
 		gene_df.iterrows(),
-		desc='Computing embeddings',
+		desc='[embed]: Computing embeddings',
 		total=n_embeddings,
 		ncols=70
 	)
