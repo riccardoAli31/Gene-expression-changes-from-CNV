@@ -6,6 +6,7 @@ from numpy import ndarray
 import torch
 from scipy.io import mmread, mmwrite
 from .embedding import embed
+import gzip
 
 
 # TODO:
@@ -130,19 +131,23 @@ class CnvDataset(torch.utils.data.Dataset):
     
     @staticmethod
     def save_embedding(embedding: ndarray, out_dir: Path, file_name: str,
-                        file_format:str='mtx') -> Path:
+                        file_format:str='mtx', compress:bool=False) -> Path:
         """
-        Function to save embedding to file.
-
-        TODO: add gzip functionality
+        Save embedding to file. Supported formats: '.pt' and '.mtx' both with
+        gzip compression.
         """
 
         file_path = out_dir / (file_name + '.' + file_format)
+        file = file_path
+        if compress:
+            file_path = file_path.parent / file_path.name + '.gz'
+            file = gzip.open(file_path, 'wb')
+
         match file_format:
             case 'pt':
-                torch.save(torch.from_numpy(embedding), file_path)
+                torch.save(torch.from_numpy(embedding), file)
             case 'mtx':
-                mmwrite(file_path, embedding)
+                mmwrite(file, embedding)
         return file_path
     
     @staticmethod
@@ -155,6 +160,10 @@ class CnvDataset(torch.utils.data.Dataset):
         """
 
         file_format = file_path.name.split('.')[-1]
+        if file_format == 'gz':
+            file_path = gzip.open(file_path)
+            file_format = file_path.name.split('.')[-2]
+
         match file_format:
             case 'pt':
                 return torch.load(file_path)
