@@ -3,10 +3,12 @@ from .embedding import embed
 from pathlib import Path
 import pandas as pd
 from typing import Union, List
+from scipy.io import mmread, mmwrite
+import gzip
 
 
 # TODO:
-# * test funcitonality
+# * implement compression with gzip
 # * add labels
 # * pre-load embeddings from file to buffer I/O time
 # file size of one single_gene_barcode matrix: 561463 bytes
