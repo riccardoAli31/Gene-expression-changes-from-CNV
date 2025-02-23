@@ -30,7 +30,7 @@ assert b1_val_path.exists()
 
 # compute all embeddings for batch 1
 df = pd.read_csv(b1_val_path, sep='\t')
-CopyNumerDNADataset(
+CnvDataset(
     root=data_root / 'embeddings' / 'batch_1' / 'val',
     data_df=df,
     fasta_path=genome_fasta,
