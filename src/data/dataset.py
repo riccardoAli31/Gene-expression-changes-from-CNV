@@ -1,17 +1,29 @@
-import torch
-from src.dataloader.embedding import embed
+#!/ust/bin/python
+from typing import Union, List
 from pathlib import Path
-import pandas as pd
-from typing import Union, Tuple, List
+from pandas import DataFrame
+from numpy import ndarray
+import torch
+from scipy.io import mmread, mmwrite
+from .embedding import embed
+import gzip
 
-class CopyNumerDNADataset(torch.utils.data.Dataset):
+
+# TODO:
+# * implement compression with gzip
+# * add labels
+# * pre-load embeddings from file to buffer I/O time
+# file size of one single_gene_barcode matrix: 561463 bytes
+
+
+class CnvDataset(torch.utils.data.Dataset):
     """
     Dataset class for DNA, ATAC and CNV data.
     """
 
-    def __init__(self, root, data_df: pd.DataFrame, *args,
+    def __init__(self, root, data_df: DataFrame, *args,
                  force_recompute=False, embedding_mode='single_gene_barcode',
-                 **kwargs):
+                 file_format='mtx', use_gzip=False, verbose=1, **kwargs):
         """
         Initialization funciton.
         Computes embeddings from raw data, if needed. In this case use kwargs:
@@ -29,18 +41,24 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
 
         self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
+        self.file_format = file_format
+        self.compress = use_gzip
 
         recompute = force_recompute or not self.root_path.exists()
 
         barcode_ids = set(data_df['barcode'])
         gene_ids = set(data_df['gene_id'])
-        print(barcode_ids)
-        print(gene_ids)
+        if verbose > 0:
+            print('Using {} barcode IDs:'.format(len(barcode_ids)))
+            print(','.join(barcode_ids))
+            print('Using {} genes IDs:'.format(len(gene_ids)))
+            print(','.join(gene_ids))
 
         if not self.root_path.exists():
             self.root_path.mkdir(parents=True)
 
-        print('Recomputing embeddings: ', recompute)
+        if verbose > 0:
+            print('Recomputing embeddings: ', recompute)
         if recompute:
             fasta_path = kwargs.get('fasta_path')
             atac_path = kwargs.get('atac_path')
@@ -56,64 +74,104 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
             )
 
             file_paths = list()
-            i = 0
             for barcode, gene_id, embedding in embedder:
-                print('{} embedding for {}, {}'.format(
-                    embedding.shape, barcode, gene_id
-                ))
-                i += 1
+                if verbose > 2:
+                    print('{} embedding for {}, {}'.format(
+                        embedding.shape, barcode, gene_id
+                    ))
                 match embedding_mode:
                     case 'single_gene_barcode':
-                        torch.save(
-                            torch.from_numpy(embedding), 
-                            self.root_path / barcode / gene_id + '.pt'
+                        file_dir = self.root_path / barcode
+                        if not file_dir.exists():
+                            file_dir.mkdir(parents=True)
+                        
+                        f_path = self.save_embedding(
+                            embedding, file_dir, gene_id, file_format
                         )
-                        file_paths.append(
-                            self.root_path / barcode / gene_id + '.pt'
-                        )
+                        file_paths.append(f_path)
                     case 'gene_concat':
-                        torch.save(
-                            torch.from_numpy(embedding), 
-                            self.root_path / barcode + '.pt'
+                        file_dir = self.root_path
+                        if not file_dir.exists():
+                            file_dir.mkdir(parents=True)
+                        
+                        f_path = self.save_embedding(
+                            embedding, file_dir, barcode, file_format
                         )
-                        file_paths.append(
-                            self.root_path / barcode / gene_id + '.pt'
-                        )
+                        file_paths.append(f_path)
                     case 'barcode_channel':
-                        torch.save(
-                            torch.from_numpy(embedding), 
-                            self.root_path / gene_id + '.pt'
+                        file_dir = self.root_path / barcode
+                        if not file_dir.exists():
+                            file_dir.mkdir(parents=True)
+
+                        f_path = self.save_embedding(
+                            embedding, file_dir, gene_id, file_format
                         )
-                        file_paths.append(
-                            self.root_path / barcode / gene_id + '.pt'
-                        )
-            print(i)
-        
+                        file_paths.append(f_path)
+
             print(len(file_paths))
             print(self.data_df.shape)
             self.data_df['embedding_path'] = file_paths
-        
-        # # create table with files
-        # match embedding_mode:
-        #     case 'single_gene_barcode':
-        #         self.data_df['embedding_path'] = [
-        #                     self.root_path / barcode / gene + '.pt'
-        #                     for gene in gene_ids
-        #                 ]
-        #     case 'gene_concat':
-        #         self.data_df['embedding_path'] = [
-        #                     self.root_path / cell + '.pt'
-        #                     for cell in barcode_ids
-        #                 ]
-        #     case 'barcode_channel':
-        #         self.data_df['embedding_path'] = [
-        #                     self.root_path / gene + '.pt'
-        #                     for gene in gene_ids
-        #                 ]        
-        # # TODO: 
-        # # * add labels
-        # # * pre-load embeddings from file to buffer I/O time
-        # # file size of one single_gene_barcode matrix: 561463 bytes
+
+        else:
+            # add file path column to self.data_df based on mode
+            match embedding_mode:
+                case 'single_gene_barcode':
+                    self.data_df['embedding_path'] = [
+                        self.root_path / barcode / (gene + '.' + file_format)
+                        for gene in gene_ids
+                    ]
+                case 'gene_concat':
+                    self.data_df['embedding_path'] = [
+                        self.root_path / (cell + '.' + file_format)
+                        for cell in barcode_ids
+                    ]
+                case 'barcode_channel':
+                    self.data_df['embedding_path'] = [
+                        self.root_path / (gene + '.' + file_format)
+                        for gene in gene_ids
+                    ]
+    
+    @staticmethod
+    def save_embedding(embedding: ndarray, out_dir: Path, file_name: str,
+                        file_format:str='mtx', compress:bool=False) -> Path:
+        """
+        Save embedding to file. Supported formats: '.pt' and '.mtx' both with
+        gzip compression.
+        """
+
+        file_path = out_dir / (file_name + '.' + file_format)
+        file = file_path
+        if compress:
+            file_path = file_path.parent / file_path.name + '.gz'
+            file = gzip.open(file_path, 'wb')
+
+        match file_format:
+            case 'pt':
+                torch.save(torch.from_numpy(embedding), file)
+            case 'mtx':
+                mmwrite(file, embedding)
+        return file_path
+    
+    @staticmethod
+    def load_embedding(file_path: Path) -> torch.Tensor:
+        """
+        Load an embedding from file depending on the file format.
+
+        TODO:
+        * gunzip for decompression
+        """
+
+        file_format = file_path.name.split('.')[-1]
+        if file_format == 'gz':
+            file_path = gzip.open(file_path)
+            file_format = file_path.name.split('.')[-2]
+
+        match file_format:
+            case 'pt':
+                return torch.load(file_path)
+            case 'mtx':
+                return torch.from_numpy(mmread(file_path))
+        raise RuntimeError('Unsupported file format: {}'.format(file_format))
 
     @staticmethod
     def _subset_embedding_rows(n_rows: int, dna=True, atac=True, cnv=True):
@@ -151,14 +209,15 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
             the _subset_embedding_rows() function.
         """
 
-        embedding = torch.load(data_df.loc[idx]['embedding_path'])
+        file_path = data_df.loc[idx]['embedding_path']
+        embedding = CnvDataset.load_embedding(file_path)
 
         if rows is not None:
             return embedding[rows,:]
         return embedding
 
     @staticmethod
-    def _get_grund_truth_label(data_df: pd.DataFrame, idx: int,
+    def _get_grund_truth_label(data_df: DataFrame, idx: int,
                                type='classification'):
         """
         Return the ground truth respective to regression or classification.
@@ -186,10 +245,13 @@ class CopyNumerDNADataset(torch.utils.data.Dataset):
             'label': self._get_grund_truth_label(self.data_df, idx)
         }
 
-    def split(self, train, test, val=None):
-        """
-        Function to create training, validation and test splits.
-        """
-        # TODO: write function to make test/val/train splits
-        pass
+    def __str__(self):
+        return '{} with {} datapoints'.format(self.__class__, len(self))
+
+    # def split(self, train, test, val=None):
+    #     """
+    #     Function to create training, validation and test splits.
+    #     """
+    #     # TODO: write function to make test/val/train splits
+    #     pass
                 
