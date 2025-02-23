@@ -8,7 +8,7 @@ import pandas as pd
 from pathlib import Path
 import sys
 sys.path.append('..')
-from src.data.dataset import CopyNumerDNADataset
+from src.data.dataset import CnvDataset
 
 # file paths
 git_root = Path('..')
@@ -25,11 +25,13 @@ b1_full_data = out_root / 'preprocessing' / 'classification_median_batch_1.tsv'
 assert b1_full_data.exists()
 b2_full_data = out_root / 'preprocessing' / 'classification_median_batch_2.tsv'
 assert b2_full_data.exists()
+b1_val_path = data_root / 'batch1_val.tsv'
+assert b1_val_path.exists()
 
 # compute all embeddings for batch 1
-df = pd.read_csv(b1_full_data, sep='\t')
+df = pd.read_csv(b1_val_path, sep='\t')
 CopyNumerDNADataset(
-    root=data_root / 'embeddings' / 'batch_1' ,
+    root=data_root / 'embeddings' / 'batch_1' / 'val',
     data_df=df,
     fasta_path=genome_fasta,
     atac_path=overlap_path,
@@ -38,15 +40,15 @@ CopyNumerDNADataset(
     embedding_mode='single_gene_barcode'
 )
 
-# compute all embeddings for batch 2
-df = pd.read_csv(b2_full_data, sep='\t')
-b1_dataset = CopyNumerDNADataset(
-    root=data_root / 'embeddings' / 'batch_2' ,
-    data_df=df,
-    fasta_path=genome_fasta,
-    atac_path=overlap_path,
-    cnv_path=epiAneufinder_path,
-    force_recompute=True,
-    embedding_mode='single_gene_barcode'
-)
+# # compute all embeddings for batch 2
+# df = pd.read_csv(b2_full_data, sep='\t')
+# b1_dataset = CopyNumerDNADataset(
+#     root=data_root / 'embeddings' / 'batch_2' ,
+#     data_df=df,
+#     fasta_path=genome_fasta,
+#     atac_path=overlap_path,
+#     cnv_path=epiAneufinder_path,
+#     force_recompute=True,
+#     embedding_mode='single_gene_barcode'
+# )
 

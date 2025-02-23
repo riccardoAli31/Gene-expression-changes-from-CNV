@@ -23,7 +23,7 @@ class CnvDataset(torch.utils.data.Dataset):
 
     def __init__(self, root, data_df: DataFrame, *args,
                  force_recompute=False, embedding_mode='single_gene_barcode',
-                 file_format='mtx', verbose=1, **kwargs):
+                 file_format='mtx', use_gzip=False, verbose=1, **kwargs):
         """
         Initialization funciton.
         Computes embeddings from raw data, if needed. In this case use kwargs:
@@ -41,6 +41,8 @@ class CnvDataset(torch.utils.data.Dataset):
 
         self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
+        self.file_format = file_format
+        self.compress = use_gzip
 
         recompute = force_recompute or not self.root_path.exists()
 
