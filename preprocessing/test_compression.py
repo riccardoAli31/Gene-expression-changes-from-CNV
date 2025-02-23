@@ -1,6 +1,11 @@
+import pickle
+from scipy.sparse import sparray, save_npz
+from scipy.io import mmwrite
+import torch
+
 name='ENSG00000090104'
 emb = torch.load('ENSG00000090104.pt')
-from scipy.sparse import sparray, save_npz
+
 emb_s = emb.to_sparse()
 torch.save(emb_s, name + '_sparse.pt')
 
