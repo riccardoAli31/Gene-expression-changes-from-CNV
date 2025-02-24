@@ -10,7 +10,6 @@ import gzip
 
 
 # TODO:
-# * implement compression with gzip
 # * add labels
 # * pre-load embeddings from file to buffer I/O time
 # file size of one single_gene_barcode matrix: 561463 bytes
@@ -41,6 +40,7 @@ class CnvDataset(torch.utils.data.Dataset):
 
         self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
+        self.embedding_mode = embedding_mode
         self.file_format = file_format
         self.compress = use_gzip
 
@@ -50,16 +50,28 @@ class CnvDataset(torch.utils.data.Dataset):
         gene_ids = set(data_df['gene_id'])
         if verbose > 0:
             print('Using {} barcode IDs:'.format(len(barcode_ids)))
-            print(','.join(barcode_ids))
+            print(','.join(barcode_ids)) if verbose > 2 else None
             print('Using {} genes IDs:'.format(len(gene_ids)))
-            print(','.join(gene_ids))
+            print(','.join(gene_ids)) if verbose > 2 else None
 
         if not self.root_path.exists():
             self.root_path.mkdir(parents=True)
 
-        if verbose > 0:
-            print('Recomputing embeddings: ', recompute)
+        # add file path column to self.data_df based on mode
+        self.data_df['embedding_path'] = self.data_df.apply(
+            lambda x: CnvDataset.path_to_embedding(
+                root=self.root_path,
+                barcode=x['barcode'],
+                gene_id=x['gene_id'],
+                embedding_mode=self.embedding_mode,
+                file_format=self.file_format
+            ),
+            axis=1
+        )
+
         if recompute:
+            if verbose > 0:
+                print('Recomputing embeddings: ', recompute)
             fasta_path = kwargs.get('fasta_path')
             atac_path = kwargs.get('atac_path')
             cnv_path = kwargs.get('cnv_path')
@@ -73,73 +85,53 @@ class CnvDataset(torch.utils.data.Dataset):
                 mode=embedding_mode
             )
 
-            file_paths = list()
             for barcode, gene_id, embedding in embedder:
                 if verbose > 2:
                     print('{} embedding for {}, {}'.format(
                         embedding.shape, barcode, gene_id
                     ))
-                match embedding_mode:
-                    case 'single_gene_barcode':
-                        file_dir = self.root_path / barcode
-                        if not file_dir.exists():
-                            file_dir.mkdir(parents=True)
-                        
-                        f_path = self.save_embedding(
-                            embedding, file_dir, gene_id, file_format
-                        )
-                        file_paths.append(f_path)
-                    case 'gene_concat':
-                        file_dir = self.root_path
-                        if not file_dir.exists():
-                            file_dir.mkdir(parents=True)
-                        
-                        f_path = self.save_embedding(
-                            embedding, file_dir, barcode, file_format
-                        )
-                        file_paths.append(f_path)
-                    case 'barcode_channel':
-                        file_dir = self.root_path / barcode
-                        if not file_dir.exists():
-                            file_dir.mkdir(parents=True)
-
-                        f_path = self.save_embedding(
-                            embedding, file_dir, gene_id, file_format
-                        )
-                        file_paths.append(f_path)
-
-            print(len(file_paths))
-            print(self.data_df.shape)
-            self.data_df['embedding_path'] = file_paths
-
-        else:
-            # add file path column to self.data_df based on mode
-            match embedding_mode:
-                case 'single_gene_barcode':
-                    self.data_df['embedding_path'] = [
-                        self.root_path / barcode / (gene + '.' + file_format)
-                        for gene in gene_ids
-                    ]
-                case 'gene_concat':
-                    self.data_df['embedding_path'] = [
-                        self.root_path / (cell + '.' + file_format)
-                        for cell in barcode_ids
-                    ]
-                case 'barcode_channel':
-                    self.data_df['embedding_path'] = [
-                        self.root_path / (gene + '.' + file_format)
-                        for gene in gene_ids
-                    ]
+                f_path = self.data_df.loc[
+                    self.data_df['barcode'].eq('AAACATGCAGGATGGC-1') & 
+                    self.data_df['gene_id'].eq('ENSG00000173406')
+                ][['embedding_path']]
+                self.save_embedding(embedding=embedding, file_path=f_path)            
     
     @staticmethod
-    def save_embedding(embedding: ndarray, out_dir: Path, file_name: str,
-                        file_format:str='mtx', compress:bool=False) -> Path:
+    def path_to_embedding(root: Path, barcode: str, gene_id: str, 
+                          embedding_mode: str, file_format='mtx', mkdir=False
+                          ) -> Path:
+        """
+        Return path to an embedding, depending on the embedding mode.
+        """
+
+        assert file_format in ('pt', 'mtx'), 'File format not supported!'
+        
+        file_dir = root
+        file_name = ''
+
+        match embedding_mode:
+            case 'single_gene_barcode':
+                file_dir = root / barcode
+                file_name = gene_id + '.' + file_format
+            case 'gene_concat':
+                file_name = barcode + '.' + file_format
+            case 'barcode_channel':
+                file_name = gene_id + '.' + file_format
+        
+        if mkdir and not file_dir.exists():
+            file_dir.mkdir(parents=True)
+
+        return file_dir / file_name
+
+    @staticmethod
+    def save_embedding(embedding: ndarray, file_path: Path, 
+                       compress:bool=False):
         """
         Save embedding to file. Supported formats: '.pt' and '.mtx' both with
         gzip compression.
         """
 
-        file_path = out_dir / (file_name + '.' + file_format)
+        file_format = file_path.name.split('.')[-1]
         file = file_path
         if compress:
             file_path = file_path.parent / file_path.name + '.gz'
@@ -150,15 +142,11 @@ class CnvDataset(torch.utils.data.Dataset):
                 torch.save(torch.from_numpy(embedding), file)
             case 'mtx':
                 mmwrite(file, embedding)
-        return file_path
     
     @staticmethod
     def load_embedding(file_path: Path) -> torch.Tensor:
         """
         Load an embedding from file depending on the file format.
-
-        TODO:
-        * gunzip for decompression
         """
 
         file_format = file_path.name.split('.')[-1]
