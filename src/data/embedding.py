@@ -441,10 +441,12 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 			n_embeddings = len(uniq_barcodes)
 
 	print('[embed]: Computing Embeddings with mode: "{}"'.format(mode))
-	print('Using {} barcodes:'.format(len(uniq_barcodes)))
-	print(','.join(uniq_barcodes))
-	print('Using {} genes:'.format(len(uniq_gene_ids)))
-	print(','.join(uniq_gene_ids))
+	print('[embed]: Using {} barcodes'.format(len(uniq_barcodes)))
+	if verbose:
+		print('[embed]:', ','.join(uniq_barcodes))
+	print('[embed]:Using {} genes'.format(len(uniq_gene_ids)))
+	if verbose:
+		print('[embed]:', ','.join(uniq_gene_ids))
 
 	if len(uniq_barcodes) == 0:
 		raise RuntimeError(
