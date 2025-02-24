@@ -444,7 +444,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	print('[embed]: Using {} barcodes'.format(len(uniq_barcodes)))
 	if verbose:
 		print('[embed]:', ','.join(uniq_barcodes))
-	print('[embed]:Using {} genes'.format(len(uniq_gene_ids)))
+	print('[embed]: Using {} genes'.format(len(uniq_gene_ids)))
 	if verbose:
 		print('[embed]:', ','.join(uniq_gene_ids))
 
@@ -490,8 +490,8 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	barcode_embeddings = []
 	genomic_iterator = tqdm(
 		gene_df.iterrows(),
-		desc='[embed]: Computing embeddings',
-		total=n_embeddings,
+		desc='[embed]: Computing embeddings (# genes done)',
+		total=len(uniq_gene_ids), # n_embeddings,
 		ncols=120
 	)
 	for i, (chrom, gene_start, gene_end, gene_id) in genomic_iterator:
