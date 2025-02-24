@@ -1,12 +1,13 @@
 #!/ust/bin/python
-from typing import Union, List
+from typing import Union, List, Dict
 from pathlib import Path
-from pandas import DataFrame
-from numpy import ndarray
+from pandas import DataFrame, merge
+from numpy import ndarray, uint8
 import torch
 from scipy.io import mmread, mmwrite
 from .embedding import embed
 import gzip
+from warnings import warn
 
 
 # TODO:
@@ -22,7 +23,8 @@ class CnvDataset(torch.utils.data.Dataset):
 
     def __init__(self, root, data_df: DataFrame, *args,
                  force_recompute=False, embedding_mode='single_gene_barcode',
-                 file_format='mtx', use_gzip=False, verbose=1, **kwargs):
+                 file_format='mtx', use_gzip=False, verbose=1, 
+                 dtype=uint8, **kwargs):
         """
         Initialization funciton.
         Computes embeddings from raw data, if needed. In this case use kwargs:
@@ -35,7 +37,12 @@ class CnvDataset(torch.utils.data.Dataset):
             'barcode', 'gene_id', 'expression_count', 'classification'
             where 'barcode' and 'gene_id' represent the cell barcode and ENSEMBL
             id of the respective data point while 'expression_count' and
-            'classification' are the regression and classification targets. 
+            'classification' are the regression and classification targets.
+
+        TODO:
+        * get embedding file paths by traversing file tree
+        * debugging embedding creation
+        * update documentation 
         """
 
         self.root_path = Path(root) / embedding_mode
@@ -43,15 +50,16 @@ class CnvDataset(torch.utils.data.Dataset):
         self.embedding_mode = embedding_mode
         self.file_format = file_format
         self.compress = use_gzip
+        self.dtype = dtype
 
         recompute = force_recompute or not self.root_path.exists()
 
         barcode_ids = set(data_df['barcode'])
         gene_ids = set(data_df['gene_id'])
         if verbose > 0:
-            print('Using {} barcode IDs:'.format(len(barcode_ids)))
+            print('Using {} barcodes'.format(len(barcode_ids)))
             print(','.join(barcode_ids)) if verbose > 2 else None
-            print('Using {} genes IDs:'.format(len(gene_ids)))
+            print('Using {} genes'.format(len(gene_ids)))
             print(','.join(gene_ids)) if verbose > 2 else None
 
         if not self.root_path.exists():
@@ -59,12 +67,9 @@ class CnvDataset(torch.utils.data.Dataset):
 
         # add file path column to self.data_df based on mode
         self.data_df['embedding_path'] = self.data_df.apply(
-            lambda x: CnvDataset.path_to_embedding(
-                root=self.root_path,
+            lambda x: self.ids_to_emb_path(
                 barcode=x['barcode'],
                 gene_id=x['gene_id'],
-                embedding_mode=self.embedding_mode,
-                file_format=self.file_format
             ),
             axis=1
         )
@@ -85,43 +90,102 @@ class CnvDataset(torch.utils.data.Dataset):
                 mode=embedding_mode
             )
 
+            path_list = list()
+            barcode_list = list()
+            gene_id_list = list()
             for barcode, gene_id, embedding in embedder:
                 if verbose > 2:
                     print('{} embedding for {}, {}'.format(
                         embedding.shape, barcode, gene_id
                     ))
-                f_path = self.data_df.loc[
-                    self.data_df['barcode'].eq('AAACATGCAGGATGGC-1') & 
-                    self.data_df['gene_id'].eq('ENSG00000173406')
-                ][['embedding_path']]
-                self.save_embedding(embedding=embedding, file_path=f_path)            
-    
-    @staticmethod
-    def path_to_embedding(root: Path, barcode: str, gene_id: str, 
-                          embedding_mode: str, file_format='mtx', mkdir=False
-                          ) -> Path:
+                f_path = self.ids_to_emb_path(barcode, gene_id)
+                self.save_embedding(embedding=embedding, file_path=f_path)
+                barcode_list.append(barcode)
+                gene_id_list.append(gene_id)
+                path_list.append(f_path)
+            
+            # filter df for samples with embeddings
+            emb_df = DataFrame({
+                'barcode': barcode_list,
+                'gene_id': gene_id_list,
+                'embedding_path': path_list
+            })
+
+            self.data_df = merge(
+                self.data_df,
+                emb_df,
+                how='right',
+                on=['barcode', 'gene_id']
+            )
+        
+        else:
+            # filter data points by file paths from directory traversion
+            file_list = list()
+            if embedding_mode == 'single_gene_concat':
+                file_list = [
+                    f for d in self.root_path.iterdir() for f in d.iterdir()
+                    if f.name.split('.')[-1] == self.file_format
+                ]
+            else:
+                file_list = [
+                    f for f in self.root_path.iterdir()
+                    if f.name.split('.')[-1] == self.file_format
+                ]
+
+            missing_paths = set(self.data_df['embedding_path']).difference(
+                set(file_list)
+            )
+            if len(missing_paths) > 0:
+                warn('Embedding files not found for {} data points'.format(
+                    len(missing_paths)
+                    )
+                )
+                if verbose > 2:
+                    print(','.join(missing_paths))
+            elif len(missing_paths) >= self.data_df.shape[0]:
+                raise RuntimeError('No embedding files found!')
+            
+            self.data_df = self.data_df[
+                self.data_df['embedding_path'].isin(file_list)
+            ]
+
+    def ids_to_emb_path(self, barcode: str, gene_id: str, mkdir=False) -> Path:
         """
         Return path to an embedding, depending on the embedding mode.
         """
 
-        assert file_format in ('pt', 'mtx'), 'File format not supported!'
+        # assert file_format in ('pt', 'mtx'), 'File format not supported!'
         
-        file_dir = root
+        file_dir = self.root_path
         file_name = ''
 
-        match embedding_mode:
+        match self.embedding_mode:
             case 'single_gene_barcode':
-                file_dir = root / barcode
-                file_name = gene_id + '.' + file_format
+                file_dir = self.root_path / barcode
+                file_name = gene_id + '.' + self.file_format
             case 'gene_concat':
-                file_name = barcode + '.' + file_format
+                file_name = barcode + '.' + self.file_format
             case 'barcode_channel':
-                file_name = gene_id + '.' + file_format
+                file_name = gene_id + '.' + self.file_format
         
         if mkdir and not file_dir.exists():
             file_dir.mkdir(parents=True)
 
         return file_dir / file_name
+    
+    def emb_path_to_ids(self, emb_path: Path) -> Dict[str: str]:
+        """
+        Convert an emedding file path to associated ids.
+        """
+        file_name_id = emb_path.name.split('.')[0]
+        match self.embedding_mode:
+            case 'single_gene_barcode':
+                barcode = emb_path.parts[-2]
+                return {'barcode': barcode, 'gene_id': file_name_id}
+            case 'gene_concat':
+                return {'barode': file_name_id}
+            case 'barcode_channel':
+                return {'gene_id': file_name_id}
 
     @staticmethod
     def save_embedding(embedding: ndarray, file_path: Path, 
@@ -144,7 +208,7 @@ class CnvDataset(torch.utils.data.Dataset):
                 mmwrite(file, embedding)
     
     @staticmethod
-    def load_embedding(file_path: Path) -> torch.Tensor:
+    def load_embedding(file_path: Path, dtype=uint8) -> torch.Tensor:
         """
         Load an embedding from file depending on the file format.
         """
@@ -158,7 +222,7 @@ class CnvDataset(torch.utils.data.Dataset):
             case 'pt':
                 return torch.load(file_path)
             case 'mtx':
-                return torch.from_numpy(mmread(file_path))
+                return torch.from_numpy(mmread(file_path).astype(dtype))
         raise RuntimeError('Unsupported file format: {}'.format(file_format))
 
     @staticmethod
@@ -233,7 +297,7 @@ class CnvDataset(torch.utils.data.Dataset):
             'label': self._get_grund_truth_label(self.data_df, idx)
         }
 
-    def __str__(self):
+    def __repr__(self):
         return '{} with {} datapoints'.format(self.__class__, len(self))
 
     # def split(self, train, test, val=None):
