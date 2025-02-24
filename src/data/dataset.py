@@ -111,6 +111,8 @@ class CnvDataset(torch.utils.data.Dataset):
                 'embedding_path': path_list
             })
 
+            print('emb_df\n', emb_df)
+
             self.data_df = merge(
                 self.data_df,
                 emb_df,
@@ -173,7 +175,7 @@ class CnvDataset(torch.utils.data.Dataset):
 
         return file_dir / file_name
     
-    def emb_path_to_ids(self, emb_path: Path) -> Dict[str: str]:
+    def emb_path_to_ids(self, emb_path: Path) -> Dict[str, str]:
         """
         Convert an emedding file path to associated ids.
         """
