@@ -3,7 +3,13 @@ from typing import Union, List, Dict
 from pathlib import Path
 from pandas import DataFrame, merge
 from numpy import ndarray, uint8
-import torch
+from torch import (
+    Tensor,
+    save as pyt_save,
+    load as pyt_load,
+    from_numpy as pyt_from_numpy
+)
+from torch.utils.data import Dataset
 from scipy.io import mmread, mmwrite
 from .embedding import embed
 import gzip
@@ -16,7 +22,7 @@ from warnings import warn
 # file size of one single_gene_barcode matrix: 561463 bytes
 
 
-class CnvDataset(torch.utils.data.Dataset):
+class CnvDataset(Dataset):
     """
     Dataset class for DNA, ATAC and CNV data.
     """
@@ -66,13 +72,13 @@ class CnvDataset(torch.utils.data.Dataset):
             self.root_path.mkdir(parents=True)
 
         # add file path column to self.data_df based on mode
-        self.data_df['embedding_path'] = self.data_df.apply(
-            lambda x: self.ids_to_emb_path(
-                barcode=x['barcode'],
-                gene_id=x['gene_id'],
-            ),
-            axis=1
-        )
+        # self.data_df['embedding_path'] = self.data_df.apply(
+        #     lambda x: self.ids_to_emb_path(
+        #         barcode=x['barcode'],
+        #         gene_id=x['gene_id'],
+        #     ),
+        #     axis=1
+        # )
 
         if recompute:
             if verbose > 0:
@@ -99,7 +105,7 @@ class CnvDataset(torch.utils.data.Dataset):
                         embedding.shape, barcode, gene_id
                     ))
                 f_path = self.ids_to_emb_path(barcode, gene_id)
-                self.save_embedding(embedding=embedding, file_path=f_path)
+                self._save_embedding(embedding=embedding, file_path=f_path)
                 barcode_list.append(barcode)
                 gene_id_list.append(gene_id)
                 path_list.append(f_path)
@@ -134,22 +140,41 @@ class CnvDataset(torch.utils.data.Dataset):
                     if f.name.split('.')[-1] == self.file_format
                 ]
 
-            missing_paths = set(self.data_df['embedding_path']).difference(
-                set(file_list)
+            # create dataframe with file found on disk
+            emb_on_disk_df = DataFrame({
+                self.emb_path_to_ids(p) for p in file_list
+            })
+            emb_on_disk_df['embedding_path'] = file_list
+
+            # merge data
+            merge_df = merge(
+                self.data_df,
+                emb_on_disk_df,
+                how='outer',
+                on=['barcode', 'gene_id']
             )
-            if len(missing_paths) > 0:
-                warn('Embedding files not found for {} data points'.format(
-                    len(missing_paths)
-                    )
-                )
+
+            # print missing
+            missing_df = merge_df[merge_df['embedding_path'].isna()]
+            if missing_df.shape[0] > 0:
+                print('No embedding files for {} data points in {}!'.format(
+                    missing_df.shape[0], self.root_path
+                ))
                 if verbose > 2:
-                    print(','.join(missing_paths))
-            elif len(missing_paths) >= self.data_df.shape[0]:
+                    print(missing_df)
+            elif missing_df.shape[0] == self.data_df.shape[0]:
                 raise RuntimeError('No embedding files found!')
             
-            self.data_df = self.data_df[
-                self.data_df['embedding_path'].isin(file_list)
-            ]
+            # print unused data
+            unused_df = merge_df[merge_df['classification'].isna()]
+            if unused_df.shape[0] > 0:
+                print('Found {} unused embedding files in {}!'.format(
+                    unused_df.shape[0], self.root_path
+                ))
+                if verbose > 2:
+                    print(unused_df)
+            
+            self.data_df = merge_df[merge_df['embedding_path'].isin(file_list)]
 
     def ids_to_emb_path(self, barcode: str, gene_id: str, mkdir=False) -> Path:
         """
@@ -190,7 +215,7 @@ class CnvDataset(torch.utils.data.Dataset):
                 return {'gene_id': file_name_id}
 
     @staticmethod
-    def save_embedding(embedding: ndarray, file_path: Path, 
+    def _save_embedding(embedding: ndarray, file_path: Path, 
                        compress:bool=False):
         """
         Save embedding to file. Supported formats: '.pt' and '.mtx' both with
@@ -205,12 +230,12 @@ class CnvDataset(torch.utils.data.Dataset):
 
         match file_format:
             case 'pt':
-                torch.save(torch.from_numpy(embedding), file)
+                pyt_save(pyt_from_numpy(embedding), file)
             case 'mtx':
                 mmwrite(file, embedding)
     
     @staticmethod
-    def load_embedding(file_path: Path, dtype=uint8) -> torch.Tensor:
+    def _load_embedding(file_path: Path, dtype=uint8) -> Tensor:
         """
         Load an embedding from file depending on the file format.
         """
@@ -222,9 +247,9 @@ class CnvDataset(torch.utils.data.Dataset):
 
         match file_format:
             case 'pt':
-                return torch.load(file_path)
+                return pyt_load(file_path)
             case 'mtx':
-                return torch.from_numpy(mmread(file_path).astype(dtype))
+                return pyt_from_numpy(mmread(file_path).astype(dtype))
         raise RuntimeError('Unsupported file format: {}'.format(file_format))
 
     @staticmethod
@@ -264,7 +289,7 @@ class CnvDataset(torch.utils.data.Dataset):
         """
 
         file_path = data_df.loc[idx]['embedding_path']
-        embedding = CnvDataset.load_embedding(file_path)
+        embedding = CnvDataset._load_embedding(file_path)
 
         if rows is not None:
             return embedding[rows,:]
