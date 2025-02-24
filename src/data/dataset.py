@@ -30,7 +30,7 @@ class CnvDataset(Dataset):
     def __init__(self, root, data_df: DataFrame, *args,
                  force_recompute=False, embedding_mode='single_gene_barcode',
                  file_format='mtx', use_gzip=False, verbose=1, 
-                 dtype=uint8, **kwargs):
+                 dtype=uint8, target_type='classification', **kwargs):
         """
         Initialization funciton.
         Computes embeddings from raw data, if needed. In this case use kwargs:
@@ -57,6 +57,12 @@ class CnvDataset(Dataset):
         self.file_format = file_format
         self.compress = use_gzip
         self.dtype = dtype
+        if target_type == 'classification':
+            self.target_type = target_type
+        elif target_type == 'regression':
+            self.target_type = 'expression_count'
+        else:
+            raise RuntimeError('Unknown target type: {}'.format(target_type))
 
         recompute = force_recompute or not self.root_path.exists()
 
@@ -117,7 +123,8 @@ class CnvDataset(Dataset):
                 'embedding_path': path_list
             })
 
-            print('emb_df\n', emb_df)
+            if verbose > 1:
+                print('emb_df\n', emb_df)
 
             self.data_df = merge(
                 self.data_df,
@@ -129,7 +136,7 @@ class CnvDataset(Dataset):
         else:
             # filter data points by file paths from directory traversion
             file_list = list()
-            if embedding_mode == 'single_gene_concat':
+            if embedding_mode == 'single_gene_barcode':
                 file_list = [
                     f for d in self.root_path.iterdir() for f in d.iterdir()
                     if f.name.split('.')[-1] == self.file_format
@@ -141,10 +148,15 @@ class CnvDataset(Dataset):
                 ]
 
             # create dataframe with file found on disk
-            emb_on_disk_df = DataFrame({
-                self.emb_path_to_ids(p) for p in file_list
-            })
+            record_list = [self.emb_path_to_ids(p) for p in file_list]
+            emb_on_disk_df = DataFrame.from_records(record_list)
             emb_on_disk_df['embedding_path'] = file_list
+
+            if verbose > 1:
+                print('emb_on_disk_df')
+                print(emb_on_disk_df)
+                print('CnVDataset.data_df')
+                print(self.data_df)
 
             # merge data
             merge_df = merge(
@@ -153,6 +165,10 @@ class CnvDataset(Dataset):
                 how='outer',
                 on=['barcode', 'gene_id']
             )
+
+            if verbose > 1:
+                print('merge_df')
+                print(merge_df)
 
             # print missing
             missing_df = merge_df[merge_df['embedding_path'].isna()]
@@ -166,7 +182,7 @@ class CnvDataset(Dataset):
                 raise RuntimeError('No embedding files found!')
             
             # print unused data
-            unused_df = merge_df[merge_df['classification'].isna()]
+            unused_df = merge_df[merge_df[self.target_type].isna()]
             if unused_df.shape[0] > 0:
                 print('Found {} unused embedding files in {}!'.format(
                     unused_df.shape[0], self.root_path
@@ -174,7 +190,10 @@ class CnvDataset(Dataset):
                 if verbose > 2:
                     print(unused_df)
             
-            self.data_df = merge_df[merge_df['embedding_path'].isin(file_list)]
+            self.data_df = merge_df.loc[
+                merge_df['embedding_path'].isin(file_list) &
+                ~merge_df[self.target_type].isna()
+            ]
 
     def ids_to_emb_path(self, barcode: str, gene_id: str, mkdir=False) -> Path:
         """
@@ -216,7 +235,7 @@ class CnvDataset(Dataset):
 
     @staticmethod
     def _save_embedding(embedding: ndarray, file_path: Path, 
-                       compress:bool=False):
+                        compress:bool=False):
         """
         Save embedding to file. Supported formats: '.pt' and '.mtx' both with
         gzip compression.
@@ -227,6 +246,9 @@ class CnvDataset(Dataset):
         if compress:
             file_path = file_path.parent / file_path.name + '.gz'
             file = gzip.open(file_path, 'wb')
+
+        if not file_path.parent.exists():
+            file_path.parent.mkdir(parents=True)
 
         match file_format:
             case 'pt':
@@ -277,7 +299,7 @@ class CnvDataset(Dataset):
         return rows
 
     @staticmethod
-    def _get_embedding(data_df, idx, rows=Union[List[int], None]):
+    def _get_embedding(data_df, idx, rows:Union[List[int], None]=None):
         """
         Loads embeddings from file and filters rows.
 
@@ -288,7 +310,7 @@ class CnvDataset(Dataset):
             the _subset_embedding_rows() function.
         """
 
-        file_path = data_df.loc[idx]['embedding_path']
+        file_path = data_df.iloc[idx]['embedding_path']
         embedding = CnvDataset._load_embedding(file_path)
 
         if rows is not None:
@@ -297,7 +319,7 @@ class CnvDataset(Dataset):
 
     @staticmethod
     def _get_grund_truth_label(data_df: DataFrame, idx: int,
-                               type='classification'):
+                               target_type='classification'):
         """
         Return the ground truth respective to regression or classification.
 
@@ -309,11 +331,8 @@ class CnvDataset(Dataset):
         idx : int of index in data_df
         type : str, one of 'regression' or 'classification'
         """
-        match type:
-            case 'classification':
-                return data_df.loc[idx]['classification']
-            case 'expression_count':
-                return data_df.loc[idx]['expression_count']
+        
+        return data_df.iloc[idx][target_type]
 
     def __len__(self):
         return self.data_df.shape[0]
@@ -321,11 +340,18 @@ class CnvDataset(Dataset):
     def __getitem__(self, idx, **kwargs):
         return {
             'embedding': self._get_embedding(self.data_df, idx, **kwargs),
-            'label': self._get_grund_truth_label(self.data_df, idx)
+            'label': self._get_grund_truth_label(
+                self.data_df, idx, self.target_type
+            )
         }
 
     def __repr__(self):
         return '{} with {} datapoints'.format(self.__class__, len(self))
+
+    def __str__(self):
+        return '{} with {} datapoints\n{}'.format(
+            self.__class__, len(self), self.data_df.head()
+        )
 
     # def split(self, train, test, val=None):
     #     """
