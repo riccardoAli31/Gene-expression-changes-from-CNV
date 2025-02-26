@@ -51,6 +51,18 @@ class CnvDataset(Dataset):
         * update documentation 
         """
 
+        assert not data_df.empty, 'DataFrame data_df is empty!'
+        assert embedding_mode in (
+            'single_gene_barcode', 'gene_concat', 'barcode_channel'
+        ), 'Unsupported embedding mode: {}'.format(embedding_mode)
+        assert file_format in ('pt', 'mtx'), 'File format not supported!'
+        assert target_type in ('classification', 'regression'),\
+            'Unknown target_type: {} != "classification" / "regression"'.format(
+                target_type
+            )
+        
+        super().__init__(*args, **kwargs)
+
         self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
         self.embedding_mode = embedding_mode
@@ -77,14 +89,8 @@ class CnvDataset(Dataset):
         if not self.root_path.exists():
             self.root_path.mkdir(parents=True)
 
-        # add file path column to self.data_df based on mode
-        # self.data_df['embedding_path'] = self.data_df.apply(
-        #     lambda x: self.ids_to_emb_path(
-        #         barcode=x['barcode'],
-        #         gene_id=x['gene_id'],
-        #     ),
-        #     axis=1
-        # )
+        # define merge_df variable here to overwrite later
+        merge_df = None
 
         if recompute:
             if verbose > 0:
@@ -126,7 +132,7 @@ class CnvDataset(Dataset):
             if verbose > 1:
                 print('emb_df\n', emb_df)
 
-            self.data_df = merge(
+            merge_df = merge(
                 self.data_df,
                 emb_df,
                 how='right',
@@ -166,41 +172,40 @@ class CnvDataset(Dataset):
                 on=['barcode', 'gene_id']
             )
 
-            if verbose > 1:
-                print('merge_df')
-                print(merge_df)
+        # report missing/unused embeddings for both cases
+        if verbose > 1:
+            print('merge_df')
+            print(merge_df)
 
-            # print missing
-            missing_df = merge_df[merge_df['embedding_path'].isna()]
-            if missing_df.shape[0] > 0:
-                print('No embedding files for {} data points in {}!'.format(
-                    missing_df.shape[0], self.root_path
-                ))
-                if verbose > 2:
-                    print(missing_df)
-            elif missing_df.shape[0] == self.data_df.shape[0]:
-                raise RuntimeError('No embedding files found!')
-            
-            # print unused data
-            unused_df = merge_df[merge_df[self.target_type].isna()]
-            if unused_df.shape[0] > 0:
-                print('Found {} unused embedding files in {}!'.format(
-                    unused_df.shape[0], self.root_path
-                ))
-                if verbose > 2:
-                    print(unused_df)
-            
-            self.data_df = merge_df.loc[
-                merge_df['embedding_path'].isin(file_list) &
-                ~merge_df[self.target_type].isna()
-            ]
+        # print missing
+        missing_df = merge_df[merge_df['embedding_path'].isna()]
+        if missing_df.shape[0] > 0:
+            print('No embedding files for {} data points in {}!'.format(
+                missing_df.shape[0], self.root_path
+            ))
+            if verbose > 2:
+                print(missing_df)
+        elif missing_df.shape[0] == self.data_df.shape[0]:
+            raise RuntimeError('No embedding files found!')
+        
+        # print unused
+        unused_df = merge_df[merge_df[self.target_type].isna()]
+        if unused_df.shape[0] > 0:
+            print('Found {} embedding files with no target value in {}!'.format(
+                unused_df.shape[0], self.root_path
+            ))
+            if verbose > 2:
+                print(unused_df)
+        
+        self.data_df = merge_df.loc[
+            merge_df['embedding_path'].isin(file_list) &
+            ~merge_df[self.target_type].isna()
+        ]
 
     def ids_to_emb_path(self, barcode: str, gene_id: str, mkdir=False) -> Path:
         """
         Return path to an embedding, depending on the embedding mode.
         """
-
-        # assert file_format in ('pt', 'mtx'), 'File format not supported!'
         
         file_dir = self.root_path
         file_name = ''
@@ -299,7 +304,7 @@ class CnvDataset(Dataset):
         return rows
 
     @staticmethod
-    def _get_embedding(data_df, idx, rows:Union[List[int], None]=None):
+    def _get_embedding(data_df, idx: int, rows:Union[List[int], None]=None):
         """
         Loads embeddings from file and filters rows.
 
@@ -318,8 +323,7 @@ class CnvDataset(Dataset):
         return embedding
 
     @staticmethod
-    def _get_grund_truth_label(data_df: DataFrame, idx: int,
-                               target_type='classification'):
+    def _get_grund_truth(data_df: DataFrame, idx: int, target_type: str):
         """
         Return the ground truth respective to regression or classification.
 
@@ -329,7 +333,7 @@ class CnvDataset(Dataset):
             id of the respective data point while 'expression_count' and
             'classification' are the regression and classification targets.
         idx : int of index in data_df
-        type : str, one of 'regression' or 'classification'
+        type : str, one of 'expression_count' or 'classification'
         """
         
         return data_df.iloc[idx][target_type]
@@ -340,9 +344,7 @@ class CnvDataset(Dataset):
     def __getitem__(self, idx, **kwargs):
         return {
             'embedding': self._get_embedding(self.data_df, idx, **kwargs),
-            'label': self._get_grund_truth_label(
-                self.data_df, idx, self.target_type
-            )
+            'target': self._get_grund_truth(self.data_df, idx, self.target_type)
         }
 
     def __repr__(self):
