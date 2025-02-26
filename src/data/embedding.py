@@ -367,7 +367,15 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 
 	# apply subsetting by gene_id
 	if gene_set is not None:
-		uniq_gene_ids = uniq_gene_ids.intersection(gene_set)
+		uniq_gene_overlap = uniq_gene_ids.intersection(gene_set)
+		print('[embed]: Filtering out {} genes based on gene_set param'.format(
+			len(uniq_gene_ids) - len(uniq_gene_overlap)
+		))
+		if verbose:
+			print(','.join(
+				[gid for gid in uniq_gene_ids if gid not in uniq_gene_overlap]
+			))
+		uniq_gene_ids = uniq_gene_overlap
 
 	gene_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)]\
 		[['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
@@ -396,7 +404,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	cnv_df = cnv_df.sort_values(by=['seq', 'start', 'end'])
 	cnv_df['seq'] = Series(map(lambda x: x.replace('chr', ''), cnv_df['seq']))
 
-	# ==== Iteration Mapping ====s
+	# ==== Iteration Mapping ====
 	# reshape barcode -> gene_ids dict to gene_id -> barcode dict
 	gene_to_barcodes = dict()
 	n_embeddings = 0
@@ -408,7 +416,15 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		iter_gene_set = {
 			gene for vals in barcode_to_genes.values() for gene in vals
 		}
-		uniq_gene_ids = uniq_gene_ids.intersection(iter_gene_set)
+		uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
+		print('[embed]: Filtering out {} genes based on barcode_to_genes param'\
+			.format(len(uniq_gene_ids) - len(uniq_gene_overlap))
+		)
+		if verbose:
+			print(','.join(
+				[gid for gid in uniq_gene_ids if gid not in uniq_gene_overlap]
+			))
+		uniq_gene_ids = uniq_gene_overlap
 
 		# sort uniq barcodes for alphabetical iteration order
 		uniq_barcodes = sorted(list(uniq_barcodes))
@@ -440,7 +456,9 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		case 'gene_concat':
 			n_embeddings = len(uniq_barcodes)
 
-	print('[embed]: Computing Embeddings with mode: "{}"'.format(mode))
+	print('[embed]: Computing {} Embeddings with mode: "{}"'.format(
+		n_embeddings, mode
+	))
 	print('[embed]: Using {} barcodes'.format(len(uniq_barcodes)))
 	if verbose:
 		print('[embed]:', ','.join(uniq_barcodes))
