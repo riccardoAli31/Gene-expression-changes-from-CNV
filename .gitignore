@@ -34,4 +34,5 @@ data/*
 out/
 log/*
 !log/meeting_log.md
-report/
+report/*
+!report/cmscb8-references.bib
