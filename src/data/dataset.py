@@ -353,6 +353,12 @@ class CnvDataset(Dataset):
             self.__class__, len(self), self.data_df.head()
         )
 
+    def class_balance(self):
+        assert self.target_type == 'classification', \
+            'Only class balance for classification'
+        return self.data_df[self.target_type].unique()
+        # TODO: count class labels and divide by
+
     # def split(self, train, test, val=None):
     #     """
     #     Function to create training, validation and test splits.
