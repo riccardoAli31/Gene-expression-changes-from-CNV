@@ -2,8 +2,9 @@
 from typing import Union, List, Dict
 from pathlib import Path
 from pandas import DataFrame, merge
-from numpy import ndarray, uint8
+from numpy import ndarray
 from torch import (
+    uint8,
     Tensor,
     save as pyt_save,
     load as pyt_load,
@@ -61,7 +62,7 @@ class CnvDataset(Dataset):
                 target_type
             )
         
-        super().__init__(*args, **kwargs)
+        # super().__init__(self) #, *args, **kwargs
 
         self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
@@ -90,7 +91,7 @@ class CnvDataset(Dataset):
             self.root_path.mkdir(parents=True)
 
         # define merge_df variable here to overwrite later
-        merge_df = None
+        # merge_df = None
 
         if recompute:
             if verbose > 0:
@@ -98,21 +99,31 @@ class CnvDataset(Dataset):
             fasta_path = kwargs.get('fasta_path')
             atac_path = kwargs.get('atac_path')
             cnv_path = kwargs.get('cnv_path')
+            emb_verbose = True if verbose > 2 else False
+
+            barcodes_to_genes = {
+                barcode: list(set(
+                    data_df[data_df['barcode'] == barcode]['gene_id']
+                ))
+                for barcode in set(data_df['barcode'])
+            }
 
             embedder = embed(
                 fasta_path,
                 atac_path,
                 cnv_path,
-                gene_set=gene_ids,
-                barcode_set=barcode_ids,
-                mode=embedding_mode
+                # gene_set=gene_ids,
+                # barcode_set=barcode_ids,
+                barcode_to_genes=barcodes_to_genes,
+                mode=embedding_mode,
+                verbose=emb_verbose
             )
 
             path_list = list()
             barcode_list = list()
             gene_id_list = list()
             for barcode, gene_id, embedding in embedder:
-                if verbose > 2:
+                if verbose > 3:
                     print('{} embedding for {}, {}'.format(
                         embedding.shape, barcode, gene_id
                     ))
@@ -132,7 +143,8 @@ class CnvDataset(Dataset):
             if verbose > 1:
                 print('emb_df\n', emb_df)
 
-            merge_df = merge(
+            # merge_df =
+            self.data_df = merge(
                 self.data_df,
                 emb_df,
                 how='right',
@@ -140,67 +152,92 @@ class CnvDataset(Dataset):
             )
         
         else:
-            # filter data points by file paths from directory traversion
-            file_list = list()
-            if embedding_mode == 'single_gene_barcode':
-                file_list = [
-                    f for d in self.root_path.iterdir() for f in d.iterdir()
-                    if f.name.split('.')[-1] == self.file_format
-                ]
-            else:
-                file_list = [
-                    f for f in self.root_path.iterdir()
-                    if f.name.split('.')[-1] == self.file_format
-                ]
+            # TODO: only create paths for data_df and check if they exist
+            self.data_df['embedding_path'] = [
+                self.ids_to_emb_path(b, g) for b, g in 
+                self.data_df[['barcode', 'gene_id']].itertuples(index=False)
+            ]
 
-            # create dataframe with file found on disk
-            record_list = [self.emb_path_to_ids(p) for p in file_list]
-            emb_on_disk_df = DataFrame.from_records(record_list)
-            emb_on_disk_df['embedding_path'] = file_list
+            # approach to get ids from existing paths
+            # # filter data points by file paths from directory traversion
+            # file_list = list()
+            # if embedding_mode == 'single_gene_barcode':
+            #     file_list = [
+            #         f for d in self.root_path.iterdir() for f in d.iterdir()
+            #         if f.name.split('.')[-1] == self.file_format
+            #     ]
+            # else:
+            #     file_list = [
+            #         f for f in self.root_path.iterdir()
+            #         if f.name.split('.')[-1] == self.file_format
+            #     ]
 
-            if verbose > 1:
-                print('emb_on_disk_df')
-                print(emb_on_disk_df)
-                print('CnVDataset.data_df')
-                print(self.data_df)
+            # # create dataframe with file found on disk
+            # record_list = [self.emb_path_to_ids(p) for p in file_list]
+            # emb_on_disk_df = DataFrame.from_records(record_list)
+            # emb_on_disk_df['embedding_path'] = file_list
 
-            # merge data
-            merge_df = merge(
-                self.data_df,
-                emb_on_disk_df,
-                how='outer',
-                on=['barcode', 'gene_id']
-            )
+            # if verbose > 1:
+            #     print('emb_on_disk_df')
+            #     print(emb_on_disk_df)
+            #     print('CnVDataset.data_df')
+            #     print(self.data_df)
+            
+            # if emb_on_disk_df.empty:
+            #     raise RuntimeError('No embedding files found on disk!')
 
+            # # merge data
+            # merge_df = merge(
+            #     self.data_df,
+            #     emb_on_disk_df,
+            #     how='outer',
+            #     on=['barcode', 'gene_id']
+            # )
+        
         # report missing/unused embeddings for both cases
-        if verbose > 1:
-            print('merge_df')
-            print(merge_df)
-
+        if verbose > 2:
+            print('data_df before missing files drop') # merge_df
+            print(self.data_df)
+        
         # print missing
-        missing_df = merge_df[merge_df['embedding_path'].isna()]
-        if missing_df.shape[0] > 0:
+        missing_df = self.data_df[self.data_df.apply(
+            lambda x: not x['embedding_path'].exists(),
+            axis=1
+        )]
+        if not missing_df.empty:
             print('No embedding files for {} data points in {}!'.format(
                 missing_df.shape[0], self.root_path
             ))
-            if verbose > 2:
-                print(missing_df)
+            if verbose > 1:
+                print(missing_df['embedding_path'][0])
         elif missing_df.shape[0] == self.data_df.shape[0]:
             raise RuntimeError('No embedding files found!')
         
-        # print unused
-        unused_df = merge_df[merge_df[self.target_type].isna()]
-        if unused_df.shape[0] > 0:
-            print('Found {} embedding files with no target value in {}!'.format(
-                unused_df.shape[0], self.root_path
-            ))
-            if verbose > 2:
-                print(unused_df)
+        self.data_df = self.data_df.drop(missing_df.index)
+
+        # missing_df = merge_df[merge_df['embedding_path'].isna()]
+        # if missing_df.shape[0] > 0:
+        #     print('No embedding files for {} data points in {}!'.format(
+        #         missing_df.shape[0], self.root_path
+        #     ))
+        #     if verbose > 2:
+        #         print(missing_df)
+        # elif missing_df.shape[0] == self.data_df.shape[0]:
+        #     raise RuntimeError('No embedding files found!')
         
-        self.data_df = merge_df.loc[
-            merge_df['embedding_path'].isin(file_list) &
-            ~merge_df[self.target_type].isna()
-        ]
+        # print unused (in case of creating dataset from paths)
+        # unused_df = merge_df[merge_df[self.target_type].isna()]
+        # if unused_df.shape[0] > 0:
+        #     print('Found {} embedding files with no target value in {}!'.format(
+        #         unused_df.shape[0], self.root_path
+        #     ))
+        #     if verbose > 2:
+        #         print(unused_df)
+        
+        # self.data_df = merge_df.loc[
+        #     merge_df['embedding_path'].isin(file_list) &
+        #     ~merge_df[self.target_type].isna()
+        # ]
 
     def ids_to_emb_path(self, barcode: str, gene_id: str, mkdir=False) -> Path:
         """
@@ -274,9 +311,9 @@ class CnvDataset(Dataset):
 
         match file_format:
             case 'pt':
-                return pyt_load(file_path)
+                return pyt_load(file_path).to(dtype)
             case 'mtx':
-                return pyt_from_numpy(mmread(file_path).astype(dtype))
+                return pyt_from_numpy(mmread(file_path)).to(dtype)
         raise RuntimeError('Unsupported file format: {}'.format(file_format))
 
     @staticmethod

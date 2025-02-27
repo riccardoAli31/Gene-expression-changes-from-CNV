@@ -345,6 +345,9 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	assert os.path.isfile(fasta_path), 'FASTA not found: {}'.format(fasta_path)
 	assert os.path.isfile(atac_path), 'Overlaps not found: {}'.format(atac_path)
 	assert os.path.isfile(cnv_path), 'CNV file not found: {}'.format(cnv_path)
+	assert barcode_to_genes is not None or gene_set is not None, \
+		'One of these parameters is at least required:\n' +\
+		'- barcode_to_genes or\n- gene_set'
 
 	# ==== OPEN CHROMATIN ====
 	# load open chromatin peaks
@@ -363,19 +366,15 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
 	# concat sorted dataframes
 	atac_df = pd_concat([atac_df_auto, atac_df_allo])
-	uniq_gene_ids = set(atac_df['gene_id'].unique())
+	# uniq_gene_ids = set(atac_df['gene_id'].unique())
+	# TODO:
+	# - change this to require gene_set or barcodes_to_genes
+	# - change embed atac to return vector of 0s if gene_id not in df
 
 	# apply subsetting by gene_id
+	uniq_gene_ids = set()
 	if gene_set is not None:
-		uniq_gene_overlap = uniq_gene_ids.intersection(gene_set)
-		print('[embed]: Filtering out {} genes based on gene_set param'.format(
-			len(uniq_gene_ids) - len(uniq_gene_overlap)
-		))
-		if verbose:
-			print(','.join(
-				[gid for gid in uniq_gene_ids if gid not in uniq_gene_overlap]
-			))
-		uniq_gene_ids = uniq_gene_overlap
+		uniq_gene_ids = set(gene_set)
 
 	gene_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)]\
 		[['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
@@ -416,15 +415,18 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		iter_gene_set = {
 			gene for vals in barcode_to_genes.values() for gene in vals
 		}
-		uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
-		print('[embed]: Filtering out {} genes based on barcode_to_genes param'\
-			.format(len(uniq_gene_ids) - len(uniq_gene_overlap))
-		)
-		if verbose:
-			print(','.join(
-				[gid for gid in uniq_gene_ids if gid not in uniq_gene_overlap]
-			))
-		uniq_gene_ids = uniq_gene_overlap
+		if gene_set is not None:
+			uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
+			print('[embed]: Filtering out {} genes based on barcode_to_genes param'\
+				.format(len(uniq_gene_ids) - len(uniq_gene_overlap))
+			)
+			if verbose:
+				print(','.join(
+					[gid for gid in uniq_gene_ids if gid not in uniq_gene_overlap]
+				))
+			uniq_gene_ids = uniq_gene_overlap
+		else:
+			uniq_gene_ids = iter_gene_set
 
 		# sort uniq barcodes for alphabetical iteration order
 		uniq_barcodes = sorted(list(uniq_barcodes))
@@ -436,6 +438,12 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 			for gene in barcode_to_genes[cnv_barcode]:
 				if gene in uniq_gene_ids:
 					gene_to_barcodes[gene].append(cnv_barcode)
+		
+		new_n_embeddings = sum(map(len, gene_to_barcodes.values()))
+		assert new_n_embeddings == n_embeddings, \
+			'Barcode to gene mapping failed: {} != {} # embeddings'.format(
+				new_n_embeddings, n_embeddings
+			) 
 		
 	else:
 		print('[embed]: Iterating over all possible barcode-gene combinations')
@@ -504,10 +512,15 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		mode=mode
 	)
 
+	def generate_gene_barcode_pairs(gene_to_barc):
+		for gid, b_list in gene_to_barc.items():
+			for b in b_list:
+				yield (gid, b)
+
 	genomic_embeddings = []
 	barcode_embeddings = []
 	genomic_iterator = tqdm(
-		gene_df.iterrows(),
+		gene_df.iterrows(), # gene_to_barcodes.items()
 		desc='[embed]: Computing embeddings (# genes done)',
 		total=len(uniq_gene_ids), # n_embeddings,
 		ncols=120
@@ -567,7 +580,13 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 				
 			case 'single_gene_barcode':
 				# get barcodes selected for this gene
-				gene_barcode_list = gene_to_barcodes[gene_id]
+				gene_barcode_list = gene_to_barcodes.get(gene_id, None)
+				if gene_barcode_list is None:
+					print('[embed]: skipping gene: {} (no barcodes)'.format(
+						gene_id
+					))
+					continue
+				
 				cnv_columns = ['seq', 'start', 'end']
 				cnv_columns.extend(gene_barcode_list)
 				if verbose:
