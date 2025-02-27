@@ -61,7 +61,7 @@ class CnvDataset(Dataset):
                 target_type
             )
         
-        super().__init__(*args, **kwargs)
+        super().__init__() # *args, **kwargs
 
         self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
