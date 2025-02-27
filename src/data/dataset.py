@@ -198,7 +198,7 @@ class CnvDataset(Dataset):
                 print(unused_df)
         
         self.data_df = merge_df.loc[
-            merge_df['embedding_path'].isin(file_list) &
+            merge_df['embedding_path'].apply(lambda p: p.exists()) &
             ~merge_df[self.target_type].isna()
         ]
 
