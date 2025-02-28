@@ -10,6 +10,7 @@ from numpy import concat as np_concat
 from pandas import DataFrame, Series, read_csv
 from pandas import concat as pd_concat
 from typing import List, Tuple, Dict, Union, Set, Generator, Any
+import pyranges as pr
 from tqdm import tqdm
 from warnings import warn
 import os
@@ -20,6 +21,7 @@ from . import (
     generate_fasta_entries,
     dna_padding
 )
+from . import standard_chromosomes
 from ..util import relative_idx
 
 
@@ -159,6 +161,7 @@ def encode_cnv_status(embedding_interval: Tuple[int, int],
 	return vstack([cnv_loss, cnv_gain])
 
 
+@DeprecationWarning
 def embed_dna(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 			  fasta_path: str, pad_dna=True, verbose=False
 			  ) -> Generator[Tuple[str,int,int,ndarray],Any,Any]:
@@ -174,6 +177,8 @@ def embed_dna(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 	pad_dna : bool wether to use padding character for embedding positions 
 		downstream of the associated gene end position.
 	verbose : bool wether to print file reading progress.
+
+	TODO: use pyranges.get_sequence()
 	"""
 
 	# generate DNA embeddings
@@ -198,6 +203,25 @@ def embed_dna(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 			dna_seq = dna_padding(dna_seq, relative_idx(gene_end, (emb_start, emb_end)))
 
 		yield (chrom, emb_start, emb_end, encode_dna_seq(dna_seq))
+
+
+def get_dna_embedding(regions: DataFrame, embedding_window: Tuple[int,int],
+					  fasta_path: str, pad_dna=True, verbose=False
+					  ):
+	"""
+	fasta_path default 'data/reference/GRCh38.d1.vd1.fa'
+	"""
+	assert regions.shape[0] == 1
+	chrom, gene_start, gene_end, _ = regions
+	emb_upstream, emb_downstream = embedding_window
+	emb_start, emb_end = gene_start - emb_upstream, gene_start + emb_downstream
+	dna_seq = pr.get_sequence(pr.PyRanges(regions), fasta_path)[0]
+	if pad_dna:
+		dna_seq = dna_padding(
+			dna_seq,
+			relative_idx(gene_end, (emb_start, emb_end))
+		)
+	return encode_dna_seq(dna_seq)
 	
 
 def embed_atac(gene_regions: DataFrame, embedding_window: Tuple[int,int],
@@ -301,11 +325,11 @@ def embed_cnv(gene_regions: DataFrame, cnv_df: DataFrame,
 				)
 
 
-def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
+def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='gene_concat',
 		  barcode_to_genes: Union[Dict[str, List[str]], None]=None,
 		  barcode_set: Union[Set[str], None]=None,
 		  gene_set: Union[Set[str], None]=None, verbose=False,
-		  pad_dna=True, n_upstream=2000, n_downstream=8000, gtf_path=None
+		  pad_dna=True, n_upstream=2000, n_downstream=8000,
 		  ) -> Generator[Tuple[str,str,ndarray],Any,Any]:
 	"""
 	Main wrapper function. Generates embeddings from following files:
@@ -343,8 +367,56 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	"""
 
 	assert os.path.isfile(fasta_path), 'FASTA not found: {}'.format(fasta_path)
+	assert os.path.isfile(gtf_path), 'GTF not found: {}'.format(gtf_path)
 	assert os.path.isfile(atac_path), 'Overlaps not found: {}'.format(atac_path)
 	assert os.path.isfile(cnv_path), 'CNV file not found: {}'.format(cnv_path)
+	
+	# TODO: use pyranges to parse gene entries
+	# * filter genes not present in gtf -> raise exception
+	# * quick fix: use gene positions and overlap file from gaja
+	# import pyranges as pr
+	# gtf = pr.read_gtf('data/reference/Homo_sapiens.GRCh38.113.gtf.gz')
+	# import sys
+	# sys.getsizeof(gtf)
+	# gtf[(gtf.Feature == 'gene') & (gtf.Chromosome.isin(['1', '21']))].df.loc[0]
+	# pr.get_sequence(gtf[(gtf.Feature == 'gene') & (gtf.gene_id == 'ENSG00000142611')], 'data/reference/GRCh38.d1.vd1.fa')
+
+	# === GTF ANNOTATION ===
+	# TODO: use pyranges to read annotation from gtf
+	# use 'data/gene_positions_and_overlaps/gene_positions.csv'
+	gene_df = read_csv(gtf_path)
+	gene_df = gene_df[gene_df['Chromosome'].isin(standard_chromosomes)]
+	gene_df = gene_df.rename(columns={
+		'seqnames': 'Chromosome', 'start': 'Start', 'end': 'End'
+	})
+	uniq_gene_ids = set(gene_df['gene_id'].unique())
+
+	# apply subsetting by gene_id
+	if gene_set is not None:
+		uniq_gene_overlap = uniq_gene_ids.intersection(gene_set)
+		print('[embed]: No GTF annotation for {} genes from gene_set'.format(
+			len(gene_set) - len(uniq_gene_overlap)
+		))
+		if verbose:
+			print(','.join(
+				[gid for gid in gene_set if gid not in uniq_gene_overlap]
+			))
+		uniq_gene_ids = uniq_gene_overlap
+	if barcode_to_genes is not None:
+		iter_gene_set = {
+			gene for vals in barcode_to_genes.values() for gene in vals
+		}
+		uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
+		print('[embed]: No GTF annotation for {} genes from barcode_to_genes'\
+			.format(len(iter_gene_set) - len(uniq_gene_overlap))
+		)
+		if verbose:
+			print(','.join(
+				[gid for gid in iter_gene_set if gid not in uniq_gene_overlap]
+			))
+		uniq_gene_ids = uniq_gene_overlap
+
+	gene_df = gene_df[gene_df['gene_id'].isin(uniq_gene_ids)]
 
 	# ==== OPEN CHROMATIN ====
 	# load open chromatin peaks
@@ -363,22 +435,6 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 	atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(str)
 	# concat sorted dataframes
 	atac_df = pd_concat([atac_df_auto, atac_df_allo])
-	uniq_gene_ids = set(atac_df['gene_id'].unique())
-
-	# apply subsetting by gene_id
-	if gene_set is not None:
-		uniq_gene_overlap = uniq_gene_ids.intersection(gene_set)
-		print('[embed]: Filtering out {} genes based on gene_set param'.format(
-			len(uniq_gene_ids) - len(uniq_gene_overlap)
-		))
-		if verbose:
-			print(','.join(
-				[gid for gid in uniq_gene_ids if gid not in uniq_gene_overlap]
-			))
-		uniq_gene_ids = uniq_gene_overlap
-
-	gene_df = atac_df[atac_df['gene_id'].isin(uniq_gene_ids)]\
-		[['Chromosome', 'Start_gene', 'End_gene', 'gene_id']].drop_duplicates()
 	
 	# ==== CNV ====
 	# load EpiAneufinder result table 
@@ -413,18 +469,6 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		print('[embed]: Iterating over custom barcode to genes mapping')
 		iter_barcode_set = set(barcode_to_genes.keys())
 		uniq_barcodes = uniq_barcodes.intersection(iter_barcode_set)
-		iter_gene_set = {
-			gene for vals in barcode_to_genes.values() for gene in vals
-		}
-		uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
-		print('[embed]: Filtering out {} genes based on barcode_to_genes param'\
-			.format(len(uniq_gene_ids) - len(uniq_gene_overlap))
-		)
-		if verbose:
-			print(','.join(
-				[gid for gid in uniq_gene_ids if gid not in uniq_gene_overlap]
-			))
-		uniq_gene_ids = uniq_gene_overlap
 
 		# sort uniq barcodes for alphabetical iteration order
 		uniq_barcodes = sorted(list(uniq_barcodes))
@@ -489,6 +533,7 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		fasta_path=fasta_path,
 		pad_dna=pad_dna
 	)
+	# atac embedder only for 'single_gene_barcode' mode 
 	atac_embedder = embed_atac(
 		gene_regions=gene_df,
 		embedding_window=(n_upstream, n_downstream),
@@ -512,9 +557,13 @@ def embed(fasta_path, atac_path, cnv_path, mode='gene_concat',
 		total=len(uniq_gene_ids), # n_embeddings,
 		ncols=120
 	)
-	for i, (chrom, gene_start, gene_end, gene_id) in genomic_iterator:
+	for i, row in genomic_iterator:
+		chrom, gene_start, gene_end, gene_id = row
 		
-		_, _, _, dna_embedding = next(dna_embedder)
+		# _, _, _, dna_embedding = next(dna_embedder)
+		dna_embedding = get_dna_embedding(DataFrame(row).T)
+
+		# TODO: make barcode dependent
 		_, _, _, atac_embedding = next(atac_embedder)
 
 		genomic_embedding = vstack([
