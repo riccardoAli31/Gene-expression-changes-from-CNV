@@ -17,7 +17,7 @@ def extract_gtf_annotation(gtf_line: str, field):
 
 
 def generate_genomic_regions(gene_ids: List[str],
-							  path_to_gft='data/Homo_sapiens.GRCh38.113.gtf.gz',
+							  path_to_gft='data/reference/Homo_sapiens.GRCh38.113.gtf.gz',
 							  entry_types={'gene'}):
 	"""
 	Generates genomic regions for genes of interest.
