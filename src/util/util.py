@@ -17,7 +17,7 @@ def relative_idx(idx: int, interval: Tuple[int,int],
 	"""
 
 	start, end = interval
-	assert start < end
+	assert start < end, 'Start >= End: {} >= {}'.format(start, end)
 
 	if clip_start and idx < start:
 		idx = start
