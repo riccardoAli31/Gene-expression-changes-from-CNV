@@ -53,30 +53,31 @@ def encode_dna_seq(dna: str, **kwargs) -> ndarray:
 			N padding as a separate row, please adapt this here.  
 	"""
 	
+	dtype = kwargs.get('dtype', 'u1')
 	dna = dna.upper()
 
 	nucleotide_encoding = {
-		"A": array([1, 0, 0, 0], dtype='u1', ndmin=2).T,
-		"C": array([0, 1, 0, 0], dtype='u1', ndmin=2).T,
-		"G": array([0, 0, 1, 0], dtype='u1', ndmin=2).T,
-		"T": array([0, 0, 0, 1], dtype='u1', ndmin=2).T,
-		# "U": array([0, 0, 0, 1], dtype='u1', ndmin=2).T,
-		"R": array([1, 0, 1, 0], dtype='u1', ndmin=2).T,
-		"Y": array([0, 1, 0, 1], dtype='u1', ndmin=2).T,
-		"M": array([1, 1, 0, 0], dtype='u1', ndmin=2).T,
-		"K": array([0, 0, 1, 1], dtype='u1', ndmin=2).T,
-		"S": array([0, 1, 1, 0], dtype='u1', ndmin=2).T,
-		"W": array([1, 0, 0, 1], dtype='u1', ndmin=2).T,
-		"B": array([0, 1, 1, 1], dtype='u1', ndmin=2).T,
-		"D": array([1, 0, 1, 1], dtype='u1', ndmin=2).T,
-		"H": array([1, 1, 0, 1], dtype='u1', ndmin=2).T,
-		"V": array([1, 1, 1, 0], dtype='u1', ndmin=2).T,
-		"N": array([1, 1, 1, 1], dtype='u1', ndmin=2).T,
-		# "X": array([1, 1, 1, 1], dtype='u1', ndmin=2).T,
-		# "-": array([0, 0, 0, 0], dtype='u1', ndmin=2).T,
+		"A": array([1, 0, 0, 0], dtype=dtype, ndmin=2).T,
+		"C": array([0, 1, 0, 0], dtype=dtype, ndmin=2).T,
+		"G": array([0, 0, 1, 0], dtype=dtype, ndmin=2).T,
+		"T": array([0, 0, 0, 1], dtype=dtype, ndmin=2).T,
+		# "U": array([0, 0, 0, 1], dtype=dtype, ndmin=2).T,
+		"R": array([1, 0, 1, 0], dtype=dtype, ndmin=2).T,
+		"Y": array([0, 1, 0, 1], dtype=dtype, ndmin=2).T,
+		"M": array([1, 1, 0, 0], dtype=dtype, ndmin=2).T,
+		"K": array([0, 0, 1, 1], dtype=dtype, ndmin=2).T,
+		"S": array([0, 1, 1, 0], dtype=dtype, ndmin=2).T,
+		"W": array([1, 0, 0, 1], dtype=dtype, ndmin=2).T,
+		"B": array([0, 1, 1, 1], dtype=dtype, ndmin=2).T,
+		"D": array([1, 0, 1, 1], dtype=dtype, ndmin=2).T,
+		"H": array([1, 1, 0, 1], dtype=dtype, ndmin=2).T,
+		"V": array([1, 1, 1, 0], dtype=dtype, ndmin=2).T,
+		"N": array([1, 1, 1, 1], dtype=dtype, ndmin=2).T,
+		# "X": array([1, 1, 1, 1], dtype=dtype, ndmin=2).T,
+		# "-": array([0, 0, 0, 0], dtype=dtype, ndmin=2).T,
 	}
 
-	# encoded_dna = zeros((len(alphabet), len(dna)), dtype='u1')
+	# encoded_dna = zeros((len(alphabet), len(dna)), dtype=dtype)
 	encoded_dna = [nucleotide_encoding[aa] for aa in dna]
 	return hstack(encoded_dna)
 
@@ -94,9 +95,10 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 		list of peaks from ATAC-seq  
 	"""
 
+	dtype = kwargs.get('dtype', 'u1')
 	emb_start, emb_end = embedding_interval
 	assert emb_start < emb_end
-	atac_embedding = zeros((1, emb_end - emb_start), dtype='u1')
+	atac_embedding = zeros((1, emb_end - emb_start), dtype=dtype)
 	for (peak_start, peak_end) in peak_intervals:
 		if emb_end <= peak_start:
 			continue
@@ -125,7 +127,7 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 
 
 def encode_cnv_status(embedding_region: pr.PyRanges, cnv_regions: pr.PyRanges,
-					  ) -> ndarray:
+					  **kwargs) -> ndarray:
 	"""
 	The CNV embedding part is a (2 x embedding_length) numpy.ndarray where the
 	first row encodes a CNV loss and the second row CNS gains.
@@ -143,19 +145,20 @@ def encode_cnv_status(embedding_region: pr.PyRanges, cnv_regions: pr.PyRanges,
 	assert len(embedding_region) == 1, 'Expecting only one genomic range!'
 	assert len(cnv_regions.columns) == 4, 'Expecting 4 column cnv status data!'
 
+	dtype = kwargs.get('dtype', 'u1')
 	emb_start, emb_end = embedding_region.Start, embedding_region.End
 	emb_length = emb_end - emb_start
 
 	# TODO: how to handle missing values / CNV overlaps?
 	if cnv_regions.empty:
 		raise RuntimeError('No CNV data for {} and {} at {}:{}-{}'.format(
-			embedding_region.gene_id, embedding_region.barcode, 
-			embedding_region.Chromosome, emb_start, emb_end
+			embedding_region.gene_id.iloc[0], embedding_region.barcode.iloc[0], 
+			embedding_region.Chromosome.iloc[0], emb_start, emb_end
 		))
 		# return zeros((2, emb_length))
 
-	cnv_loss = zeros(emb_length)
-	cnv_gain = zeros(emb_length)
+	cnv_loss = zeros(emb_length, dtype=dtype)
+	cnv_gain = zeros(emb_length, dtype=dtype)
 
 	for _ ,(chromosome, start, end, status) in cnv_regions.df.iterrows():
 		# start and end are already calculated by PyRanges.intersect
@@ -214,7 +217,7 @@ def embed_dna(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 
 
 def get_dna_embedding(regions: pr.PyRanges, fasta_path:str, 
-					  pad_dna=True, get_seq=False):
+					  pad_dna=True, get_seq=False, **kwargs):
 	"""
 	fasta_path default 'data/reference/GRCh38.d1.vd1.fa'
 	"""
@@ -226,7 +229,7 @@ def get_dna_embedding(regions: pr.PyRanges, fasta_path:str,
 	if get_seq:
 		dna_seq = pr.get_sequence(pr.PyRanges(regions), fasta_path)[0]
 	else:
-		dna_seq = regions.df['Sequence'].values[0]
+		dna_seq = regions.Sequence.values[0]
 	if pad_dna:
 		dna_seq = dna_padding(
 			dna_seq,
@@ -235,7 +238,7 @@ def get_dna_embedding(regions: pr.PyRanges, fasta_path:str,
 				(regions.df.iloc[0]['Start'], regions.df.iloc[0]['End'])
 			)
 		)
-	return encode_dna_seq(dna_seq)
+	return encode_dna_seq(dna_seq, **kwargs)
 	
 @DeprecationWarning
 def embed_atac(gene_regions: DataFrame, embedding_window: Tuple[int,int],
@@ -274,16 +277,21 @@ def embed_atac(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 		)
 
 
-def get_atac_embedding(regions: pr.PyRanges, embedding_window: Tuple[int,int]):
+def get_atac_embedding(regions: pr.PyRanges, embedding_window: Tuple[int,int],
+					   **kwargs):
 	if regions.empty:
-		return zeros((1, sum(embedding_window)))
+		return zeros((1, sum(embedding_window)), **kwargs)
 	elif regions.df.shape[0] == 1:
-		return ones((1, sum(embedding_window)))
+		return ones((1, sum(embedding_window)), **kwargs)
 	else:
-		raise NotImplementedError('Embedding at ATAC peak boundary')
+		raise NotImplementedError(
+			'Embedding at ATAC peak boundary for {} and {}'.format(
+				regions.gene_id.iloc[0]
+			)
+		)
 		# TODO: check what if embedding spans boundary
 
-
+@DeprecationWarning
 def embed_cnv(gene_regions: DataFrame, cnv_df: DataFrame,
 			  embedding_window: Tuple[int,int], mode='gene_concat',
 			  verbose=False,
@@ -350,8 +358,7 @@ def embed_cnv(gene_regions: DataFrame, cnv_df: DataFrame,
 
 
 def get_cnv_embedding(region: pr.PyRanges, cnv_pr: pr.PyRanges, barcode: str,
-					  mode='single_gene_barcode', verbose=False,
-					  ):
+					  mode='single_gene_barcode', verbose=False, **kwargs):
 	assert mode == 'single_gene_barcode'
 	assert region.df.shape[0] == 1,\
 		'Expecting only one row/gene in this mode got {}'.format(
@@ -369,7 +376,8 @@ def get_cnv_embedding(region: pr.PyRanges, cnv_pr: pr.PyRanges, barcode: str,
 	
 	return encode_cnv_status(
 		embedding_region=region,
-		cnv_regions=cnv_pr[[barcode]].intersect(region)
+		cnv_regions=cnv_pr[[barcode]].intersect(region),
+		**kwargs
 	)
 
 
@@ -885,7 +893,7 @@ class Embedder(object):
 				barcode_to_genes: Union[Dict[str, List[str]], None]=None,
 				barcode_set: Union[Set[str], None]=None,
 				gene_set: Union[Set[str], None]=None, verbose=False,
-				pad_dna=True, n_upstream=2000, n_downstream=8000,
+				pad_dna=True, n_upstream=2000, n_downstream=8000, dtype=uint8
 				):
 		
 		# self.super().__init__()
@@ -902,6 +910,7 @@ class Embedder(object):
 		self.gtf_path = gtf_path
 		self.atac_path = atac_path
 		self.cnv_path = cnv_path
+		self.dtype = dtype
 
 		# === GTF ANNOTATION ===
 		# TODO: use pyranges to read annotation from gtf: 
@@ -947,10 +956,11 @@ class Embedder(object):
 		gene_df['End'] = gene_df['Gene_Start'] + n_downstream
 
 		# convert to pyranges
-		self.gene_pr = pr.PyRanges(gene_df)
-		self.gene_pr.Sequence = pr.get_sequence(gene_df, fasta_path)
+		gene_pr = pr.PyRanges(gene_df)
+		gene_pr.Sequence = pr.get_sequence(gene_pr, fasta_path)
+		self.gene_pr = gene_pr
 		if verbose:
-			print('[embed]:', self.gene_pr)
+			print('[embed]:\n', self.gene_pr)
 
 		# ==== OPEN CHROMATIN ====
 		# load open chromatin peaks
@@ -991,12 +1001,12 @@ class Embedder(object):
 		# cnv_df = cnv_df.drop('idx', axis=1)
 		cnv_df = pr.PyRanges(cnv_df)
 		#cnv_df = cnv_df.overlap(gene_df) # only retain overlaps with relevant genes
-		self.cnv_pr = gene_df.join(cnv_df) # do inner join
+		self.cnv_pr = self.gene_pr.join(cnv_df) # do inner join
 		# TODO: test overlaps at 100k points
 		# gc_join = gene_pr.join(cnv_pr)
 		# gc_join.df.apply(lambda r: int(str(r['Start'])[0]) < int(str(r['End'])[0]), axis = 1)
 		if verbose:
-			print('[embed]:', self.cnv_pr)
+			print('[embed]:\n', self.cnv_pr)
 
 		# ==== Iteration Mapping ====
 		# create list of tuples based on barcode_to_genes dict
@@ -1022,7 +1032,7 @@ class Embedder(object):
 						gene_to_barcodes[gene].append(cnv_barcode)
 
 			gene_barcode_pairs = [
-				(g, b) for g in gene_df.df['gene_id'] for b in gene_to_barcodes[g]
+				(g, b) for g in self.gene_pr.df['gene_id'] for b in gene_to_barcodes[g]
 			]
 			
 		else:
@@ -1033,7 +1043,7 @@ class Embedder(object):
 			uniq_barcodes = sorted(list(uniq_barcodes))
 
 			gene_barcode_pairs = [
-				(g, b) for g in gene_df.df['gene_id'] for b in uniq_barcodes
+				(g, b) for g in self.gene_pr.df['gene_id'] for b in uniq_barcodes
 			]
 
 		if len(uniq_barcodes) == 0:
@@ -1051,6 +1061,7 @@ class Embedder(object):
 
 		assert len(gene_barcode_pairs) == n_embeddings, \
 			'Iteration mapping failed! Incorrect number of embeddings'
+		self.n_embeddings = n_embeddings
 
 		print('[embed]: Computing {} Embeddings with mode: "{}"'.format(
 			n_embeddings, mode
@@ -1065,49 +1076,64 @@ class Embedder(object):
 		self.uniq_barcodes = uniq_barcodes
 		self.uniq_gene_ids = uniq_gene_ids
 
-		self.embegging_iterator = tqdm(
-			iter(gene_barcode_pairs),
-			desc='[embed]: Computing embeddings',
+		self.embegging_iterator = iter(gene_barcode_pairs)
+		self.pbar = tqdm(
 			total=n_embeddings,
-			ncols=120
+			ncols=70,
+			desc='[embed]: Computing embeddings'
 		)
+
 		self.prev_gene_id = None
+		self.dna_embedding = None
+
+	def __len__(self):
+		return self.n_embeddings
 
 	def __iter__(self):
 		return self
     
 	def __next__(self):
-		return self.next()
-    
-	def next(self):
-		gene_id, barcode = next(self.embegging_iterator)
+		try:
+			gene_id, barcode = next(self.embegging_iterator)
+		except StopIteration:
+			self.pbar.close()
+			raise StopIteration()
 		
 		# dna sequence embedding
 		if gene_id != self.prev_gene_id:
-			dna_embedding = get_dna_embedding(
+			print('[embed]: get_dna_embedding() for {}'.format(gene_id))
+			self.dna_embedding = get_dna_embedding(
 				self.gene_pr[self.gene_pr.gene_id == gene_id],
-				fasta_path=self.fasta_path
+				fasta_path=self.fasta_path,
+				dtype=self.dtype
 			)
 			self.prev_gene_id = gene_id
 
 		# get open chromatin emebdding
 		atac_embedding = get_atac_embedding(
 			self.atac_pr[
-				(self.atac_df.gene_id == gene_id) &
-				(self.atac_df.barcode == barcode)
+				(self.atac_pr.gene_id == gene_id) &
+				(self.atac_pr.barcode == barcode)
 			].overlap(self.gene_pr),
-			embedding_window=self.embedding_size
+			embedding_window=self.embedding_size,
+			dtype=self.dtype
 		)
 
 		# get CNV embedding
 		cnv_embedding = get_cnv_embedding(
 			region=self.gene_pr[self.gene_pr.gene_id == gene_id],
 			cnv_pr=self.cnv_pr[self.cnv_pr.gene_id == gene_id][[barcode]],
-			barcode=barcode
+			barcode=barcode,
+			dtype=self.dtype
 		)
+
+		self.pbar.update(1)
 
 		return (
 			barcode,
 			gene_id,
-			vstack([dna_embedding, atac_embedding, cnv_embedding])
+			vstack(
+				[self.dna_embedding, atac_embedding, cnv_embedding],
+				dtype=self.dtype
+			)
 		)
