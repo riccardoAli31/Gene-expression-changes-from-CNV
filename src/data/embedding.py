@@ -910,6 +910,8 @@ class Embedder(object):
 		self.atac_path = atac_path
 		self.cnv_path = cnv_path
 		self.dtype = dtype
+		self.ignore_missing_cnv = True
+		self.ignore_missing_atac = False
 
 		# === GTF ANNOTATION ===
 		# TODO: use pyranges to read annotation from gtf: 
@@ -1084,6 +1086,7 @@ class Embedder(object):
 
 		self.prev_gene_id = None
 		self.dna_embedding = None
+		self.cnv_missing = 0
 
 	def __len__(self):
 		return self.n_embeddings
@@ -1095,13 +1098,18 @@ class Embedder(object):
 		try:
 			gene_id, barcode = next(self.embegging_iterator)
 		except StopIteration:
+			print('[Embedder]: skipped {} embeddings missing CNV data'.format(
+				self.cnv_missing
+			))
 			self.pbar.close()
 			raise StopIteration()
+		
+		gene_region = self.gene_pr[self.gene_pr.gene_id == gene_id]
 		
 		# dna sequence embedding
 		if gene_id != self.prev_gene_id:
 			self.dna_embedding = get_dna_embedding(
-				self.gene_pr[self.gene_pr.gene_id == gene_id],
+				gene_region,
 				fasta_path=self.fasta_path,
 				dtype=self.dtype
 			)
@@ -1116,13 +1124,19 @@ class Embedder(object):
 			embedding_window=self.embedding_size,
 			dtype=self.dtype,
 			barcode=barcode,
-			embedding_start=self.gene_pr[self.gene_pr.gene_id == gene_id].Start.iloc[0]
+			embedding_start=gene_region.Start.iloc[0]
 		)
 
-		# get CNV embedding
+		# get CNV embedding; if no CNV data existent, skip this embedding
+		cnv_region = self.cnv_pr[self.cnv_pr.gene_id == gene_id][[barcode]]
+		if cnv_region.intersect(gene_region).empty and self.ignore_missing_cnv:
+			warn('No CNV data for {} and {}'.format(barcode, gene_id))
+			self.cnv_missing += 1
+			return self.__next__()
+		
 		cnv_embedding = get_cnv_embedding(
-			region=self.gene_pr[self.gene_pr.gene_id == gene_id],
-			cnv_pr=self.cnv_pr[self.cnv_pr.gene_id == gene_id][[barcode]],
+			region=gene_region,
+			cnv_pr=cnv_region,
 			barcode=barcode,
 			dtype=self.dtype
 		)
