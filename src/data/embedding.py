@@ -146,7 +146,8 @@ def encode_cnv_status(embedding_region: pr.PyRanges, cnv_regions: pr.PyRanges,
 	assert len(cnv_regions.columns) == 4, 'Expecting 4 column cnv status data!'
 
 	dtype = kwargs.get('dtype', 'u1')
-	emb_start, emb_end = embedding_region.Start, embedding_region.End
+	emb_start = embedding_region.Start.iloc[0]
+	emb_end = embedding_region.End.iloc[0]
 	emb_length = emb_end - emb_start
 
 	# TODO: how to handle missing values / CNV overlaps?
@@ -157,17 +158,14 @@ def encode_cnv_status(embedding_region: pr.PyRanges, cnv_regions: pr.PyRanges,
 		))
 		# return zeros((2, emb_length))
 
-	cnv_loss = zeros(emb_length, dtype=dtype)
-	cnv_gain = zeros(emb_length, dtype=dtype)
+	cnv_loss = zeros((1, emb_length), dtype=dtype)
+	cnv_gain = zeros((1, emb_length), dtype=dtype)
 
 	for _ ,(chromosome, start, end, status) in cnv_regions.df.iterrows():
-		# start and end are already calculated by PyRanges.intersect
-		# start = relative_idx(start, (emb_start, emb_end))
-		# end = relative_idx(end, (emb_start, emb_end))
 		if status == 0:
-			cnv_loss[start:end] = 1
+			cnv_loss[0,start - emb_start:end - emb_start] = 1
 		elif status == 2:
-			cnv_gain[start:end] = 1
+			cnv_gain[0,start - emb_start:end - emb_start] = 1
 
 	return vstack([cnv_loss, cnv_gain])
 
@@ -278,18 +276,18 @@ def embed_atac(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 
 
 def get_atac_embedding(regions: pr.PyRanges, embedding_window: Tuple[int,int],
-					   **kwargs):
+					   embedding_start: int, **kwargs):
 	if regions.empty:
-		return zeros((1, sum(embedding_window)), **kwargs)
+		return zeros((1, sum(embedding_window)), dtype=kwargs.get('dtype','u1'))
 	elif regions.df.shape[0] == 1:
-		return ones((1, sum(embedding_window)), **kwargs)
+		return ones((1, sum(embedding_window)), dtype=kwargs.get('dtype','u1'))
 	else:
-		raise NotImplementedError(
-			'Embedding at ATAC peak boundary for {} and {}'.format(
-				regions.gene_id.iloc[0]
-			)
-		)
-		# TODO: check what if embedding spans boundary
+		emb = zeros((1, sum(embedding_window)), dtype=kwargs.get('dtype','u1'))
+		for _, peak in regions.df.iterrows():
+			p_start, p_end = peak['Start'], peak['End']
+			emb[0, (p_start-embedding_start):(p_end-embedding_start)] = 1
+
+		return emb
 
 @DeprecationWarning
 def embed_cnv(gene_regions: DataFrame, cnv_df: DataFrame,
@@ -683,8 +681,9 @@ def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='single_gene_barcode',
 		atac_embedding = get_atac_embedding(
 			atac_df[
 				(atac_df.gene_id == gene_id) & (atac_df.barcode == barcode)
-			].overlap(gene_df),
-			embedding_window=(n_upstream, n_downstream)
+			].intersect(gene_df),
+			embedding_window=(n_upstream, n_downstream),
+			embedding_start=gene_df[gene_df.gene_id == gene_id].Start.iloc[0]
 		)
 
 		# get CNV embedding
@@ -890,7 +889,7 @@ class Embedder(object):
 
 	def __init__(self, fasta_path: Path, gtf_path: Path, atac_path: Path, 
 				cnv_path: Path, mode='single_gene_barcode',
-				barcode_to_genes: Union[Dict[str, List[str]], None]=None,
+				barcodes_to_genes: Union[Dict[str, List[str]], None]=None,
 				barcode_set: Union[Set[str], None]=None,
 				gene_set: Union[Set[str], None]=None, verbose=False,
 				pad_dna=True, n_upstream=2000, n_downstream=8000, dtype=uint8
@@ -934,9 +933,9 @@ class Embedder(object):
 					[gid for gid in gene_set if gid not in uniq_gene_overlap]
 				))
 			uniq_gene_ids = uniq_gene_overlap
-		if barcode_to_genes is not None:
+		if barcodes_to_genes is not None:
 			iter_gene_set = {
-				gene for vals in barcode_to_genes.values() for gene in vals
+				gene for vals in barcodes_to_genes.values() for gene in vals
 			}
 			uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
 			if len(iter_gene_set) - len(uniq_gene_overlap) > 0:
@@ -1012,13 +1011,13 @@ class Embedder(object):
 		# create list of tuples based on barcode_to_genes dict
 		gene_barcode_pairs = list()
 		n_embeddings = 0
-		if barcode_to_genes is not None:
+		if barcodes_to_genes is not None:
 			n_embeddings = len([
-				g for gl in barcode_to_genes.values() for g in gl 
+				g for gl in barcodes_to_genes.values() for g in gl 
 				if g in uniq_gene_ids
 			])
 			print('[Embedder]: Iterating over custom barcode to genes mapping')
-			iter_barcode_set = set(barcode_to_genes.keys())
+			iter_barcode_set = set(barcodes_to_genes.keys())
 			uniq_barcodes = uniq_barcodes.intersection(iter_barcode_set)
 
 			# sort uniq barcodes for alphabetical iteration order
@@ -1027,7 +1026,7 @@ class Embedder(object):
 			# create a mapping from gene to barcode to serve for iteration later
 			gene_to_barcodes = {gene: list() for gene in uniq_gene_ids}
 			for cnv_barcode in uniq_barcodes:
-				for gene in barcode_to_genes[cnv_barcode]:
+				for gene in barcodes_to_genes[cnv_barcode]:
 					if gene in uniq_gene_ids:
 						gene_to_barcodes[gene].append(cnv_barcode)
 
@@ -1101,7 +1100,6 @@ class Embedder(object):
 		
 		# dna sequence embedding
 		if gene_id != self.prev_gene_id:
-			print('[Embedder]: get_dna_embedding() for {}'.format(gene_id))
 			self.dna_embedding = get_dna_embedding(
 				self.gene_pr[self.gene_pr.gene_id == gene_id],
 				fasta_path=self.fasta_path,
@@ -1114,9 +1112,11 @@ class Embedder(object):
 			self.atac_pr[
 				(self.atac_pr.gene_id == gene_id) &
 				(self.atac_pr.barcode == barcode)
-			].overlap(self.gene_pr),
+			].intersect(self.gene_pr),
 			embedding_window=self.embedding_size,
-			dtype=self.dtype
+			dtype=self.dtype,
+			barcode=barcode,
+			embedding_start=self.gene_pr[self.gene_pr.gene_id == gene_id].Start.iloc[0]
 		)
 
 		# get CNV embedding
