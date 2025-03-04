@@ -902,7 +902,7 @@ class Embedder(object):
 		assert atac_path.is_file(), 'Overlaps not found: {}'.format(atac_path)
 		assert cnv_path.is_file(), 'CNV file not found: {}'.format(cnv_path)
 		assert mode == 'single_gene_barcode', \
-			'Only supporting "single_gene_barcode" mode at the moment!'
+			'[Embedder]: Only supporting "single_gene_barcode" mode for now!'
 		
 		self.mode = mode
 		self.embedding_size = (n_upstream, n_downstream)
@@ -926,7 +926,7 @@ class Embedder(object):
 		if gene_set is not None:
 			uniq_gene_overlap = uniq_gene_ids.intersection(gene_set)
 			if len(gene_set) - len(uniq_gene_overlap) > 0:
-				print('[embed]: No GTF annot. for {} genes from gene_set'.format(
+				print('[Embedder]: No GTF annot. for {} genes from gene_set'.format(
 					len(gene_set) - len(uniq_gene_overlap)
 				))
 			if verbose:
@@ -940,7 +940,7 @@ class Embedder(object):
 			}
 			uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
 			if len(iter_gene_set) - len(uniq_gene_overlap) > 0:
-				print('[embed]: No GTF annot. for {} genes from barcode_to_genes'\
+				print('[Embedder]: No GTF annot. for {} genes from barcode_to_genes'\
 					.format(len(iter_gene_set) - len(uniq_gene_overlap))
 				)
 			if verbose:
@@ -960,7 +960,7 @@ class Embedder(object):
 		gene_pr.Sequence = pr.get_sequence(gene_pr, fasta_path)
 		self.gene_pr = gene_pr
 		if verbose:
-			print('[embed]:\n', self.gene_pr)
+			print('[Embedder]:\n', self.gene_pr)
 
 		# ==== OPEN CHROMATIN ====
 		# load open chromatin peaks
@@ -981,7 +981,7 @@ class Embedder(object):
 		if barcode_set is not None:
 			barcode_diff = barcode_set.difference(uniq_barcodes)
 			if len(barcode_diff) > 0:
-				warn('[embed]: No CNV data for {}'.format(','.join(barcode_diff)))
+				warn('[Embedder]: No CNV data for {}'.format(','.join(barcode_diff)))
 			uniq_barcodes = uniq_barcodes.intersection(barcode_set)
 
 		# remove not needed barcodes
@@ -997,7 +997,7 @@ class Embedder(object):
 		cnv_df = cnv_df.rename(columns={
 			'seq': 'Chromosome', 'start': 'Start', 'end': 'End'
 		})
-		# print('[embed]:', cnv_df)
+		# print('[Embedder]:', cnv_df)
 		# cnv_df = cnv_df.drop('idx', axis=1)
 		cnv_df = pr.PyRanges(cnv_df)
 		#cnv_df = cnv_df.overlap(gene_df) # only retain overlaps with relevant genes
@@ -1006,7 +1006,7 @@ class Embedder(object):
 		# gc_join = gene_pr.join(cnv_pr)
 		# gc_join.df.apply(lambda r: int(str(r['Start'])[0]) < int(str(r['End'])[0]), axis = 1)
 		if verbose:
-			print('[embed]:\n', self.cnv_pr)
+			print('[Embedder]:\n', self.cnv_pr)
 
 		# ==== Iteration Mapping ====
 		# create list of tuples based on barcode_to_genes dict
@@ -1017,7 +1017,7 @@ class Embedder(object):
 				g for gl in barcode_to_genes.values() for g in gl 
 				if g in uniq_gene_ids
 			])
-			print('[embed]: Iterating over custom barcode to genes mapping')
+			print('[Embedder]: Iterating over custom barcode to genes mapping')
 			iter_barcode_set = set(barcode_to_genes.keys())
 			uniq_barcodes = uniq_barcodes.intersection(iter_barcode_set)
 
@@ -1036,7 +1036,7 @@ class Embedder(object):
 			]
 			
 		else:
-			print('[embed]: Iterating over all possible barcode-gene combinations')
+			print('[Embedder]: Iterating over all possible barcode-gene combinations')
 			n_embeddings = len(uniq_barcodes) * len(uniq_gene_ids)
 
 			# sort uniq barcodes for alphabetical iteration order
@@ -1063,15 +1063,15 @@ class Embedder(object):
 			'Iteration mapping failed! Incorrect number of embeddings'
 		self.n_embeddings = n_embeddings
 
-		print('[embed]: Computing {} Embeddings with mode: "{}"'.format(
+		print('[Embedder]: Computing {} Embeddings with mode: "{}"'.format(
 			n_embeddings, mode
 		))
-		print('[embed]: Using {} barcodes'.format(len(uniq_barcodes)))
+		print('[Embedder]: Using {} barcodes'.format(len(uniq_barcodes)))
 		if verbose:
-			print('[embed]:', ','.join(uniq_barcodes))
-		print('[embed]: Using {} genes'.format(len(uniq_gene_ids)))
+			print('[Embedder]:', ','.join(uniq_barcodes))
+		print('[Embedder]: Using {} genes'.format(len(uniq_gene_ids)))
 		if verbose:
-			print('[embed]:', ','.join(uniq_gene_ids))
+			print('[Embedder]:', ','.join(uniq_gene_ids))
 
 		self.uniq_barcodes = uniq_barcodes
 		self.uniq_gene_ids = uniq_gene_ids
@@ -1079,8 +1079,8 @@ class Embedder(object):
 		self.embegging_iterator = iter(gene_barcode_pairs)
 		self.pbar = tqdm(
 			total=n_embeddings,
-			ncols=70,
-			desc='[embed]: Computing embeddings'
+			ncols=120,
+			desc='[Embedder]: Computing embeddings'
 		)
 
 		self.prev_gene_id = None
@@ -1101,7 +1101,7 @@ class Embedder(object):
 		
 		# dna sequence embedding
 		if gene_id != self.prev_gene_id:
-			print('[embed]: get_dna_embedding() for {}'.format(gene_id))
+			print('[Embedder]: get_dna_embedding() for {}'.format(gene_id))
 			self.dna_embedding = get_dna_embedding(
 				self.gene_pr[self.gene_pr.gene_id == gene_id],
 				fasta_path=self.fasta_path,
