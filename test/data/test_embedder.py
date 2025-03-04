@@ -27,7 +27,7 @@ def test_embedder():
             cnv_path=kwargs.get('epianeu_path', epianeu_path),
             barcode_set=kwargs.get('barcode_set', None),
             gene_set=kwargs.get('gene_set', None),
-            barcode_to_genes=kwargs.get('barcode_to_genes', None),
+            barcodes_to_genes=kwargs.get('barcodes_to_genes', None),
             verbose=kwargs.get('verbose', False)
         )
         i = 0
@@ -63,7 +63,7 @@ def test_embedder():
         'CCCTGTTAGCACGTTG-1',
         'TTGTTTGGTTAATGCG-1'
     ]
-    test_barcode_to_genes = {
+    test_barcodes_to_genes = {
         'AAACCAACATGTCAGC-1': ['ENSG00000154511'],
         'CCCTGTTAGCACGTTG-1': ['ENSG00000269113', 'ENSG00000225555'],
         'TTGTTTGGTTAATGCG-1': ['ENSG00000269113', 'ENSG00000154511', 'ENSG00000188158'],
@@ -114,5 +114,5 @@ def test_embedder():
         ],
         barcode_set=set(test_barcodes),
         gene_set=set(test_genes[:-1]),
-        barcode_to_genes=test_barcode_to_genes
+        barcodes_to_genes=test_barcodes_to_genes
         )
