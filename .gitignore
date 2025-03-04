@@ -26,6 +26,13 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-data/
+**/__pycache__/
 .ipynb_checkpoints
-
+.pytest_cache/
+data/*
+!data/splits
+out/
+log/*
+!log/meeting_log.md
+report/*
+!report/cmscb8-references.bib
