@@ -1,8 +1,31 @@
-#!/bin/python
+#!/usr/bin/python
 
 """
-Script for creating embeddings from DNA regions.
-See https://genomebiology.biomedcentral.com/articles/10.1186/s13059-022-02811-x/figures/5 
+Code for computing embeddings from multi-OMICS data on DNA regions.
+Currently supported typed of data:
+* DNA sequence from reference genome
+* ATAC-seq peaks (need to be preprocessed for now)
+* CNV status (from epiAneufinder)
+
+Methodologically, overlaps of genomic regions are identified for all available
+data using [pyranges](https://pyranges.readthedocs.io/en/latest/).
+Each type of biological data is embedded using a 0 or 1 encoding (not one-hot).
+
+TODO:
+- how to handle missing CNV overlaps
+- read reference genome from .fasta.tar.gz using import tarfile?
+- use data .gtf file for CDS and promoters
+- divide into barcode, dependent and barcode independent embedders
+- create using list of funcitons
+- use ICLR conference paper template for report
+
+Possible bugs:
+- close to chromosomal end -> no epiAneufinder data
+
+References:
+* [epiAneufinder](https://www.biorxiv.org/content/10.1101/2022.04.03.485795v1)
+* [pyranges](https://academic.oup.com/bioinformatics/article/36/3/918/5543103)
+* https://genomebiology.biomedcentral.com/articles/10.1186/s13059-022-02811-x/figures/5
 """
 
 from pathlib import Path
@@ -11,7 +34,7 @@ from numpy import concat as np_concat
 from pandas import DataFrame, Series, read_csv
 from pandas import concat as pd_concat
 from typing import List, Tuple, Dict, Union, Set, Generator, Any
-import pyranges as pr
+from pyranges import PyRanges, get_sequence, read_gtf
 from tqdm import tqdm
 from warnings import warn
 import os
@@ -25,19 +48,6 @@ from . import (
 from . import standard_chromosomes
 from ..util import relative_idx
 
-
-# TODO:
-#	- how to handle missing CNV overlaps
-#	- read reference genome from .fasta.tar.gz using import tarfile?
-#	- use data .gtf file for CDS and promoters
-#	* divide into barcode, dependent and barcode independent embedders
-#	* create using list of funcitons
-#	* use pyranges for overlap computation https://pyranges.readthedocs.io/en/latest/autoapi/pyranges/index.html
-#	* cite pyranges https://academic.oup.com/bioinformatics/article/36/3/918/5543103
-#	* use ICLR conference paper template for report
-
-# Possible bugs:
-# - close to chromosomal end -> no epiAneufinder data
 
 embedding_modes = {'gene_concat', 'single_gene_barcode', 'barcode_channel'}
 
@@ -77,7 +87,6 @@ def encode_dna_seq(dna: str, **kwargs) -> ndarray:
 		# "-": array([0, 0, 0, 0], dtype=dtype, ndmin=2).T,
 	}
 
-	# encoded_dna = zeros((len(alphabet), len(dna)), dtype=dtype)
 	encoded_dna = [nucleotide_encoding[aa] for aa in dna]
 	return hstack(encoded_dna)
 
@@ -126,7 +135,7 @@ def encode_open_chromatin(embedding_interval: Tuple[int, int],
 	return atac_embedding
 
 
-def encode_cnv_status(embedding_region: pr.PyRanges, cnv_regions: pr.PyRanges,
+def encode_cnv_status(embedding_region: PyRanges, cnv_regions: PyRanges,
 					  **kwargs) -> ndarray:
 	"""
 	The CNV embedding part is a (2 x embedding_length) numpy.ndarray where the
@@ -156,7 +165,6 @@ def encode_cnv_status(embedding_region: pr.PyRanges, cnv_regions: pr.PyRanges,
 			embedding_region.gene_id.iloc[0], embedding_region.barcode.iloc[0], 
 			embedding_region.Chromosome.iloc[0], emb_start, emb_end
 		))
-		# return zeros((2, emb_length))
 
 	cnv_loss = zeros((1, emb_length), dtype=dtype)
 	cnv_gain = zeros((1, emb_length), dtype=dtype)
@@ -186,8 +194,6 @@ def embed_dna(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 	pad_dna : bool wether to use padding character for embedding positions 
 		downstream of the associated gene end position.
 	verbose : bool wether to print file reading progress.
-
-	TODO: use pyranges.get_sequence()
 	"""
 
 	# generate DNA embeddings
@@ -214,18 +220,22 @@ def embed_dna(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 		yield (chrom, emb_start, emb_end, encode_dna_seq(dna_seq))
 
 
-def get_dna_embedding(regions: pr.PyRanges, fasta_path:str, 
-					  pad_dna=True, get_seq=False, **kwargs):
+def get_dna_embedding(regions: PyRanges, fasta_path: Path, pad_dna=True, 
+					  get_seq=False, **kwargs):
 	"""
-	fasta_path default 'data/reference/GRCh38.d1.vd1.fa'
+	Return an encoded fasta DNA sequence for a genomic region.
+
+	region : pyranges.PyRanges
+	fasta_path : pathlib.Path, default 'data/reference/GRCh38.d1.vd1.fa', make
+		sure an fasta index file (.fai) exsists
+	pad_dna : bool, default True; indicating weather to add a padding if a gene
+		is shorter than the embedding window.
 	"""
+
 	assert regions.df.shape[0] == 1
-	# chrom, gene_start, gene_end, _ = regions
-	# emb_upstream, emb_downstream = embedding_window
-	# emb_start, emb_end = gene_start - emb_upstream, gene_start + emb_downstream
 	dna_seq = None
 	if get_seq:
-		dna_seq = pr.get_sequence(pr.PyRanges(regions), fasta_path)[0]
+		dna_seq = get_sequence(PyRanges(regions), fasta_path)[0]
 	else:
 		dna_seq = regions.Sequence.values[0]
 	if pad_dna:
@@ -236,6 +246,7 @@ def get_dna_embedding(regions: pr.PyRanges, fasta_path:str,
 				(regions.df.iloc[0]['Start'], regions.df.iloc[0]['End'])
 			)
 		)
+	
 	return encode_dna_seq(dna_seq, **kwargs)
 	
 @DeprecationWarning
@@ -275,15 +286,24 @@ def embed_atac(gene_regions: DataFrame, embedding_window: Tuple[int,int],
 		)
 
 
-def get_atac_embedding(regions: pr.PyRanges, embedding_window: Tuple[int,int],
-					   embedding_start: int, **kwargs):
-	if regions.empty:
-		return zeros((1, sum(embedding_window)), dtype=kwargs.get('dtype','u1'))
-	elif regions.df.shape[0] == 1:
-		return ones((1, sum(embedding_window)), dtype=kwargs.get('dtype','u1'))
+def get_atac_embedding(peak_regions: PyRanges, embedding_start: int,
+					   embedding_length: int, **kwargs):
+	"""
+	Computes an embedding of ATAC-seq data based on the peak regions and the
+	embedding start coordinate.
+
+	peak_regions : pyranges.PyRanges of peak regions
+	embedding_start : int; start coordinate of embedding
+	embedding_length : int; length of an embedding
+	"""
+	
+	if peak_regions.empty:
+		return zeros((1, embedding_length), dtype=kwargs.get('dtype','u1'))
+	elif peak_regions.df.shape[0] == 1:
+		return ones((1, embedding_length), dtype=kwargs.get('dtype','u1'))
 	else:
-		emb = zeros((1, sum(embedding_window)), dtype=kwargs.get('dtype','u1'))
-		for _, peak in regions.df.iterrows():
+		emb = zeros((1, embedding_length), dtype=kwargs.get('dtype','u1'))
+		for _, peak in peak_regions.df.iterrows():
 			p_start, p_end = peak['Start'], peak['End']
 			emb[0, (p_start-embedding_start):(p_end-embedding_start)] = 1
 
@@ -355,7 +375,7 @@ def embed_cnv(gene_regions: DataFrame, cnv_df: DataFrame,
 				)
 
 
-def get_cnv_embedding(region: pr.PyRanges, cnv_pr: pr.PyRanges, barcode: str,
+def get_cnv_embedding(region: PyRanges, cnv_pr: PyRanges, barcode: str,
 					  mode='single_gene_barcode', verbose=False, **kwargs):
 	assert mode == 'single_gene_barcode'
 	assert region.df.shape[0] == 1,\
@@ -369,8 +389,6 @@ def get_cnv_embedding(region: pr.PyRanges, cnv_pr: pr.PyRanges, barcode: str,
 
 	if verbose:
 		print('[embed_cnv]: cnv_df.columns[3:]', cnv_pr.columns[3:])
-
-	# chrom, emb_start, emb_end, gen_id = region.df.iloc[0]
 	
 	return encode_cnv_status(
 		embedding_region=region,
@@ -431,11 +449,11 @@ def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='single_gene_barcode',
 	# * filter genes not present in gtf -> raise exception
 	# * quick fix: use gene positions and overlap file from gaja
 	# import pyranges as pr
-	# gtf = pr.read_gtf('data/reference/Homo_sapiens.GRCh38.113.gtf.gz')
+	# gtf = read_gtf('data/reference/Homo_sapiens.GRCh38.113.gtf.gz')
 	# import sys
 	# sys.getsizeof(gtf)
 	# gtf[(gtf.Feature == 'gene') & (gtf.Chromosome.isin(['1', '21']))].df.loc[0]
-	# pr.get_sequence(gtf[(gtf.Feature == 'gene') & (gtf.gene_id == 'ENSG00000142611')], 'data/reference/GRCh38.d1.vd1.fa')
+	# get_sequence(gtf[(gtf.Feature == 'gene') & (gtf.gene_id == 'ENSG00000142611')], 'data/reference/GRCh38.d1.vd1.fa')
 	# use from pympler import asizeof for memory checks
 
 	# TODO:
@@ -493,8 +511,8 @@ def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='single_gene_barcode',
 	gene_df['End'] = gene_df['Gene_Start'] + n_downstream
 
 	# convert to pyranges
-	gene_df = pr.PyRanges(gene_df)
-	gene_df.Sequence = pr.get_sequence(gene_df, fasta_path)
+	gene_df = PyRanges(gene_df)
+	gene_df.Sequence = get_sequence(gene_df, fasta_path)
 	print('[embed]:', gene_df)
 
 	# ==== OPEN CHROMATIN ====
@@ -503,7 +521,7 @@ def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='single_gene_barcode',
 	atac_df = atac_df.rename(columns={
 		'Start_peak': 'Start', 'End_peak': 'End'
 	})
-	atac_df = pr.PyRanges(atac_df)
+	atac_df = PyRanges(atac_df)
 	# # sort autosomes on integer index
 	# atac_df_auto = atac_df[atac_df['Chromosome'].isin(autosomes)].copy()
 	# atac_df_auto['Chromosome'] = atac_df_auto['Chromosome'].astype(uint8)
@@ -548,7 +566,7 @@ def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='single_gene_barcode',
 	})
 	# print('[embed]:', cnv_df)
 	# cnv_df = cnv_df.drop('idx', axis=1)
-	cnv_df = pr.PyRanges(cnv_df)
+	cnv_df = PyRanges(cnv_df)
 	#cnv_df = cnv_df.overlap(gene_df) # only retain overlaps with relevant genes
 	cnv_df = gene_df.join(cnv_df) # do inner join
 	# TODO: test overlaps at 100k points
@@ -682,8 +700,8 @@ def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='single_gene_barcode',
 			atac_df[
 				(atac_df.gene_id == gene_id) & (atac_df.barcode == barcode)
 			].intersect(gene_df),
-			embedding_window=(n_upstream, n_downstream),
-			embedding_start=gene_df[gene_df.gene_id == gene_id].Start.iloc[0]
+			embedding_start=gene_df[gene_df.gene_id == gene_id].Start.iloc[0],
+			embedding_length=sum(n_upstream, n_downstream)
 		)
 
 		# get CNV embedding
@@ -829,32 +847,20 @@ def embed(fasta_path, gtf_path, atac_path, cnv_path, mode='single_gene_barcode',
 
 class Embedder(object):
 	"""
-	Main wrapper function. Generates embeddings from following files:
+	Main class generator, computing embeddings from following files:
 	* fasta reference genome sequence
-	* overlap data of ATAC-seq peaks and genes
+	* reference genome annotation as .gtf or .csv file
+		(required columns: Chromosome, Start, End, gene_id)
+		TODO: change code to assert correct column names
+	* peaks from ATAC-seq as a genomic region .tsv file (see column names above)
 	* CNV results from from EpiAneufinder (add column name for index in 1st row)
-	* gtf genome annotation (optional, only if CDS, promoter, ... data wanted)
 
 	Embeddings will be returned in genomic gene order (1st gene on chr1,
-	2nd gene on chr1, ... last gene on chrY) and alphabetical barcode order.
-
-	fasta_path : str path to reference genome .fasta file
-	atac_path : str path to overlap data from ATAC-seq peaks and genes (.tsv)
-	cnv_path : str path to results from from EpiAneufinder (.tsv file)
-	barcode_to_genes : Dict[str, List[str]] of ENSEMBL gene id lists (values)
-		for different barcodes (keys).
-	gene_set : Set[str] or None specifiying subset of ENSEMBL gene ids to use
-	barcode_set : Set[str] or None specifying subset of cell barcodes to use
-	mode : str one of ['gene_concat', 'barcode_channel', 'single_gene_barcode']
-		to specify how to combine and return embeddings. Output shapes:
-		* 'gene_concat': (n_coding_rows, embedding_len * n_genes) per barcode
-		* 'barcode_channel': (n_barcodes, n_coding_rows, embedding_len) per gene
-		* 'single_gene_barcode': (n_coding_rows, embedding_len) per gene - barc.
-		Default: 'gene_concat'
-	pad_dna : bool if pad embedding positions after gene end. Default: True
-	n_upstream : int of embedding length upstream of gene start. Default: 2000
-	n_downstream : int of embedding len. downstram of gene start. Default: 8000
-	gtf_path : None or str path to .gtf annotation file
+	2nd gene on chr1, ... last gene on chrY) and alphabetical barcode order or
+	according to a custom barcode to gene mapping dictionary. The latter will
+	result in genomic ordered genes and per gene alphabetical barcode order.
+	This can differ from overall alphabetical barcode order as not all genes 
+	need to be associated with all barcodes.
 
 	returns : Tuple[str,str,ndarray] of cell/barcode id, gene id and embedding
 		as numpy.ndarray. Note depending on mode the value of gene_id or 
@@ -862,40 +868,52 @@ class Embedder(object):
 		'all genes' ('gene_concat'). This is due to the fact, that in these
 		modes all barcodes or genes are represented in the returned embedding.
 	
-	TODO: update documentation
+	TODO:
+	* change code to assert correct column names
+	* use one consisten table format for inputs (e.g. tsv)
+	* respect strandness for all intervals
+	* read data from raw files (e.g. .h5 for ATAC peaks)
+	* parallelize embedding computation on genomic level
 	"""
 
-	# TODO: use pyranges to parse gene entries
-	# * filter genes not present in gtf -> raise exception
-	# * quick fix: use gene positions and overlap file from gaja
-	# import pyranges as pr
-	# gtf = pr.read_gtf('data/reference/Homo_sapiens.GRCh38.113.gtf.gz')
-	# import sys
-	# sys.getsizeof(gtf)
-	# gtf[(gtf.Feature == 'gene') & (gtf.Chromosome.isin(['1', '21']))].df.loc[0]
-	# pr.get_sequence(gtf[(gtf.Feature == 'gene') & (gtf.gene_id == 'ENSG00000142611')], 'data/reference/GRCh38.d1.vd1.fa')
-	# use from pympler import asizeof for memory checks
-
-	# TODO:
-	# 1. read gft/genes file and filter for genes in gene_set
-	# 2. compute embedding start and end from gene start / end
-	# 3. switch start and end columns with emb start and end
-	# 4. convert to PyRanges
-	# 5. get sequences from fasta
-	# 6. create data table with all wanted gene-barcode combinations
-	# 7. iterate over gene_id, barcode pairs
-	#   7.1. get ATAC per barcode
-	#	7.2. get CNVs per barcode
-
 	def __init__(self, fasta_path: Path, gtf_path: Path, atac_path: Path, 
-				cnv_path: Path, mode='single_gene_barcode',
+				cnv_path: Path, mode:str='single_gene_barcode',
 				barcodes_to_genes: Union[Dict[str, List[str]], None]=None,
 				barcode_set: Union[Set[str], None]=None,
 				gene_set: Union[Set[str], None]=None, verbose=False,
 				pad_dna=True, n_upstream=2000, n_downstream=8000, dtype=uint8
 				):
+		"""
+		Embedder class initialization.
+
+		Parameters:
+		fasta_path : pathlib.Path to reference genome .fasta file. Ideally, you
+			already have a fasta index (.fai) file for quick access later.
+		gtf_path : pathlib.Path to genome annotation (either .gtf or .csv)
+		atac_path : pathlib.Path to peak data from ATAC-seq as genomic regions
+			(.tsv file expected)
+		cnv_path : pathlib.Path to results from from EpiAneufinder (.tsv file)
+		barcode_to_genes : Dict[str, List[str]] or None of ENSEMBL gene id lists
+			(values) for different barcodes (keys).
+		gene_set : Set[str] or None specifiying subset of ENSEMBL gene ids
+		barcode_set : Set[str] or None specifying subset of cell barcodes to use
+		mode : str to specify how to combine and return embeddings.
+			Only supporting 'single_gene_barcode' for now.
+			Default: 'single_gene_barcode'
+
+			Output shapes:
+			* 'gene_concat': (n_coding_rows, embedding_len * n_genes)
+				returns embeddings per barcode (all selected genes concatenated)
+			* 'barcode_channel': (n_barcodes, n_coding_rows, embedding_len)
+				returns embeddings per gene (all selected barcodes stacked)
+			* 'single_gene_barcode': (n_coding_rows, embedding_len)
+				returns embeddins per gene - barccode pair
+		pad_dna : bool if pad embedding positions after gene end. Default: True
+		n_upstream : int of embedding length upstream of gene start. Default: 2000
+		n_downstream : int of embedding len. downstram of gene start. Default: 8000
+		gtf_path : None or str path to .gtf annotation file
+		"""
 		
-		# self.super().__init__()
 		assert fasta_path.is_file(), 'FASTA not found: {}'.format(fasta_path)
 		assert gtf_path.is_file(), 'GTF not found: {}'.format(gtf_path)
 		assert atac_path.is_file(), 'Overlaps not found: {}'.format(atac_path)
@@ -914,20 +932,26 @@ class Embedder(object):
 		self.ignore_missing_atac = False
 
 		# === GTF ANNOTATION ===
-		# TODO: use pyranges to read annotation from gtf: 
-		# for now use 'data/gene_positions_and_overlaps/gene_positions.csv'
-		gene_df = read_csv(gtf_path)
-		gene_df = gene_df.rename(columns={
-			'seqnames': 'Chromosome', 'start': 'Gene_Start', 'end': 'Gene_End'
-		})
-		gene_df = gene_df[gene_df['Chromosome'].isin(standard_chromosomes)]
-		uniq_gene_ids = set(gene_df['gene_id'])
+		# use pyranges to read annotation from .gtf and pandas to read from .csv
+		if gtf_path.name.split('.')[-1] == 'gtf':
+			gtf_pr = read_gtf(gtf_path)
+			self.gene_pr = gtf_pr[gtf_pr.Feature == 'gene']\
+				[['Chromosome', 'Start', 'End', 'gene_id']].unstrand()
+		elif gtf_path.name.split('.')[-1] == 'csv':
+			gene_df = read_csv(gtf_path)
+			gene_df = gene_df.rename(columns={
+				'seqnames': 'Chromosome', 'start': 'Start', 'end': 'End'
+			})
+			gene_df = gene_df[gene_df['Chromosome'].isin(standard_chromosomes)]
+			# convert to pyranges
+			self.gene_pr = PyRanges(gene_df)
 
-		# apply subsetting by gene_id
+		# identify unique gene_ids based on param gene_set and barcodes_to_genes
+		uniq_gene_ids = set(self.gene_pr.gene_id.unique())
 		if gene_set is not None:
 			uniq_gene_overlap = uniq_gene_ids.intersection(gene_set)
 			if len(gene_set) - len(uniq_gene_overlap) > 0:
-				print('[Embedder]: No GTF annot. for {} genes from gene_set'.format(
+				print('[Embedder]: No GTF data for {} genes in gene_set'.format(
 					len(gene_set) - len(uniq_gene_overlap)
 				))
 			if verbose:
@@ -941,7 +965,7 @@ class Embedder(object):
 			}
 			uniq_gene_overlap = uniq_gene_ids.intersection(iter_gene_set)
 			if len(iter_gene_set) - len(uniq_gene_overlap) > 0:
-				print('[Embedder]: No GTF annot. for {} genes from barcode_to_genes'\
+				print('[Embedder]: No GTF data for {} genes in barcodes_to_genes'\
 					.format(len(iter_gene_set) - len(uniq_gene_overlap))
 				)
 			if verbose:
@@ -950,16 +974,18 @@ class Embedder(object):
 				))
 			uniq_gene_ids = uniq_gene_overlap
 
-		gene_df = gene_df[gene_df['gene_id'].isin(uniq_gene_ids)]
+		# subset data based on unique gene_ids
+		self.gene_pr = self.gene_pr[self.gene_pr.gene_id.isin(uniq_gene_ids)]
 
-		# calculate embedding starts
-		gene_df['Start'] = gene_df['Gene_Start'] - n_upstream
-		gene_df['End'] = gene_df['Gene_Start'] + n_downstream
+		# convert start and end to embedding coordinates
+		# TODO: make strand dependent
+		self.gene_pr.Gene_Start = self.gene_pr.Start
+		self.gene_pr.Gene_End = self.gene_pr.End
+		self.gene_pr.End = self.gene_pr.Start + n_downstream
+		self.gene_pr.Start = self.gene_pr.Start - n_upstream
 
-		# convert to pyranges
-		gene_pr = pr.PyRanges(gene_df)
-		gene_pr.Sequence = pr.get_sequence(gene_pr, fasta_path)
-		self.gene_pr = gene_pr
+		# get sequence from fasta file
+		self.gene_pr.Sequence = get_sequence(self.gene_pr, fasta_path)
 		if verbose:
 			print('[Embedder]:\n', self.gene_pr)
 
@@ -969,13 +995,14 @@ class Embedder(object):
 		atac_df = atac_df.rename(columns={
 			'Start_peak': 'Start', 'End_peak': 'End'
 		})
-		self.atac_pr = pr.PyRanges(atac_df)
+		self.atac_pr = PyRanges(atac_df)
 		
 		# ==== CNV ====
 		# load EpiAneufinder result table 
 		cnv_df = read_csv(cnv_path, sep=' ')
 		assert all(cnv_df.columns[1:4] == ['seq', 'start', 'end']),\
 			'Column name Mismatch, please prepend \'idx \' to the first line.'
+		cnv_df = cnv_df.drop('idx', axis=1)
 		
 		# define unique barcodes to use for embedding computation
 		uniq_barcodes = set(cnv_df.columns[4:])
@@ -992,20 +1019,19 @@ class Embedder(object):
 			]
 		]
 
-		# cnv_df = cnv_df.sort_values(by=['seq', 'start', 'end'])
+		# reformat cnv_df to work with pyranges
 		cnv_df = cnv_df.astype({c: 'u1' for c in cnv_df.columns[4:]})
 		cnv_df['seq'] = Series(map(lambda x: x.replace('chr', ''), cnv_df['seq']))
 		cnv_df = cnv_df.rename(columns={
 			'seq': 'Chromosome', 'start': 'Start', 'end': 'End'
 		})
-		# print('[Embedder]:', cnv_df)
+		
 		# cnv_df = cnv_df.drop('idx', axis=1)
-		cnv_df = pr.PyRanges(cnv_df)
-		#cnv_df = cnv_df.overlap(gene_df) # only retain overlaps with relevant genes
-		self.cnv_pr = self.gene_pr.join(cnv_df) # do inner join
-		# TODO: test overlaps at 100k points
-		# gc_join = gene_pr.join(cnv_pr)
-		# gc_join.df.apply(lambda r: int(str(r['Start'])[0]) < int(str(r['End'])[0]), axis = 1)
+		cnv_df = PyRanges(cnv_df)
+		
+		# only retain relevant regions, that is entries of an inner join
+		self.cnv_pr = self.gene_pr.join(cnv_df)
+		
 		if verbose:
 			print('[Embedder]:\n', self.cnv_pr)
 
@@ -1037,7 +1063,7 @@ class Embedder(object):
 			]
 			
 		else:
-			print('[Embedder]: Iterating over all possible barcode-gene combinations')
+			print('[Embedder]: Iterating over all possible barcode-gene pairs')
 			n_embeddings = len(uniq_barcodes) * len(uniq_gene_ids)
 
 			# sort uniq barcodes for alphabetical iteration order
@@ -1050,14 +1076,14 @@ class Embedder(object):
 		if len(uniq_barcodes) == 0:
 			raise RuntimeError(
 				'No barcode data available!\n' +
-				'Please make sure the barcodes you want to use are present in the' +
-				' epiAneufinder results in order to have CNV data.'
+				'Please make sure the barcodes you want to use are present in' +
+				' the epiAneufinder results in order to have CNV data.'
 			)
 		if len(uniq_gene_ids) == 0:
 			raise RuntimeError(
 				'No ENSEMBL gene ids in overlap!\n' +
-				'Please make sure there is both ATAC and CNV data for the genes ' +
-				'you want to process.'
+				'Please make sure there is both ATAC and CNV data for the ' +
+				'genes you want to process.'
 			)
 
 		assert len(gene_barcode_pairs) == n_embeddings, \
@@ -1098,9 +1124,10 @@ class Embedder(object):
 		try:
 			gene_id, barcode = next(self.embegging_iterator)
 		except StopIteration:
-			print('[Embedder]: skipped {} embeddings missing CNV data'.format(
-				self.cnv_missing
-			))
+			if self.cnv_missing > 0:
+				print('[Embedder]: skipped {} embeddings missing CNV data'\
+		  			.format(self.cnv_missing)
+				)
 			self.pbar.close()
 			raise StopIteration()
 		
@@ -1121,10 +1148,10 @@ class Embedder(object):
 				(self.atac_pr.gene_id == gene_id) &
 				(self.atac_pr.barcode == barcode)
 			].intersect(self.gene_pr),
-			embedding_window=self.embedding_size,
+			embedding_start=gene_region.Start.iloc[0],
+			embedding_length=sum(self.embedding_size),
 			dtype=self.dtype,
-			barcode=barcode,
-			embedding_start=gene_region.Start.iloc[0]
+			barcode=barcode
 		)
 
 		# get CNV embedding; if no CNV data existent, skip this embedding
