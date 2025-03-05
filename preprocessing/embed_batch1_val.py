@@ -1,7 +1,7 @@
 #! /usr/bin/python
 
 """
-Script to compute embeddings for batch 1 splits.
+Script to compute embeddings for batch 1 validation split.
 """
 
 import pandas as pd
@@ -24,19 +24,6 @@ assert overlap_path.exists()
 epiAneufinder_path = out_root / 'epiAneufinder' / 'epiAneuFinder_results.tsv'
 assert epiAneufinder_path.exists()
 
-# # batch 1 train
-# b1_train_path = data_root / 'splits' / 'batch1_training_filtered.tsv'
-# df = pd.read_csv(b1_train_path, sep='\t')
-# dataset = CnvDataset(
-#     root=data_root / 'embeddings' / 'batch_1' / 'training',
-#     data_df=df,
-#     fasta_path=genome_fasta,
-#     atac_path=overlap_path,
-#     cnv_path=epiAneufinder_path,
-#     embedding_mode='single_gene_barcode'
-# )
-# print(dataset.data_df)
-
 # batch 1 validation
 b1_val_path = data_root / 'splits' / 'batch1_val_filtered.tsv'
 df = pd.read_csv(b1_val_path, sep='\t')
@@ -50,16 +37,3 @@ dataset = CnvDataset(
     embedding_mode='single_gene_barcode',
     force_recompute=True
 )
-
-# # batch 1 test
-# b1_test_path = data_root / 'splits' / 'batch1_test_filtered.tsv'
-# df = pd.read_csv(b1_test_path, sep='\t')
-# dataset = CnvDataset(
-#     root=data_root / 'embeddings' / 'batch_1' / 'test',
-#     data_df=df,
-#     fasta_path=genome_fasta,
-#     atac_path=overlap_path,
-#     cnv_path=epiAneufinder_path,
-#     embedding_mode='single_gene_barcode'
-# )
-# print(dataset.data_df)
