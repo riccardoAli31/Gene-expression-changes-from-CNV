@@ -3,7 +3,7 @@ from .gtf import extract_gtf_annotation, generate_genomic_regions
 from .cnv import extract_cnv_overlaps
 from .genome import allosomes, autosomes, standard_chromosomes
 from .embedding import (
-    embed,
+    Embedder,
     encode_dna_seq,
     encode_open_chromatin,
     encode_cnv_status
