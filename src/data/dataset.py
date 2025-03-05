@@ -18,52 +18,75 @@ import gzip
 from warnings import warn
 
 
-# TODO:
-# * add labels
-# * pre-load embeddings from file to buffer I/O time
-# file size of one single_gene_barcode matrix: 561463 bytes
-
-
 class CnvDataset(Dataset):
     """
-    Dataset class for DNA, ATAC and CNV data.
+    Dataset class for DNA, ATAC and CNV embeddings.
+    Manages a dataset defined by a pandas.DataFrame with columns
+    * barcode
+    * gene_id
+    * expression_count
+    * classification
+    Single data points are stored as files in the background.
+    This class wraps all the I/O for accessing the data.
+    Furthermore, it can also be used to compute the embeddings for a new dataset.
+    In this case the parameters fasta_path, gtf_path, atac_path and cnv_path are
+    required keyword arguments.
+
+    Some useful attributes of this class (each with according init parameter):
+    * dtype: define the torch.dtype or numpy.dtype of returned values
+    * file_format: define how to store embedding files (options: 'mtx', 'pt')
+    * return_numpy: return numpy.ndarray instead of torch.Tensor
+    * target_type: return either a regression or classification target
     """
 
-    def __init__(self, root, data_df: DataFrame, *args,
-                 force_recompute=False, embedding_mode='single_gene_barcode',
-                 file_format='mtx', use_gzip=False, verbose=1, dtype=float32, 
-                 target_type='classification', return_numpy=False, **kwargs):
+    def __init__(self, root, data_df: DataFrame, force_recompute=False,
+                 embedding_mode='single_gene_barcode', file_format='mtx',
+                 use_gzip=False, verbose=1, dtype=float32, return_numpy=False, 
+                 target_type='classification', **kwargs):
         """
-        Initialization funciton.
-        Computes embeddings from raw data, if needed. In this case use kwargs:
+        Initialize Dataset from given parameters.
+
+        If no data is found at root, or recompute is forces, this function tries
+        to compute embeddings from raw data. In this case use kwargs:
         * fasta_path: str as path to reference genome fasta file
+        * gtf_path: str as path to reference genome annotation file
         * atac_path: str as path to peaks file from ATAC-seq
         * cnv_path: str as path to EpiAneufinder results
 
+        Parameters:
         root : str as data root path
         data_df : pandas.DataFrame with columns:
             'barcode', 'gene_id', 'expression_count', 'classification'
             where 'barcode' and 'gene_id' represent the cell barcode and ENSEMBL
             id of the respective data point while 'expression_count' and
             'classification' are the regression and classification targets.
+        force_recompute : bool if to force recomputation of embeddings
+        embedding_mode : str as mode of embedding computation. Currently only
+            'single_gene_barcode' supported.
+        file_format : str one of ('mtx', 'pt') specifying which format to use
+            (.mtx gives smaller files, while .pt allows 1000x faster loading)
+        use_gzip : bool weather to use gzip compression for I/O
+        verbose : int of verbosity level (0: silent, 4: max verbosity)
+        dtype : torch.dtype of Tensor/array dtype to return.
+        return_numpy : bool if to return numpy.ndarray indead of torch.Tensor
+        target_type : str one of ('classification', 'regression') to specify
+            type of supervised learning target
 
         TODO:
-        * get embedding file paths by traversing file tree
-        * debugging embedding creation
-        * update documentation 
+        * pre-load embeddings from file to buffer I/O time
+          file size of one single_gene_barcode matrix: 561463 bytes
         """
 
         assert not data_df.empty, 'DataFrame data_df is empty!'
-        assert embedding_mode in (
-            'single_gene_barcode', 'gene_concat', 'barcode_channel'
-        ), 'Unsupported embedding mode: {}'.format(embedding_mode)
+        assert embedding_mode == 'single_gene_barcode', \
+            'Unsupported embedding mode: {}'.format(embedding_mode)
         assert file_format in ('pt', 'mtx'), 'File format not supported!'
         assert target_type in ('classification', 'regression'),\
             'Unknown target_type: {} != "classification" / "regression"'.format(
                 target_type
             )
         
-        super().__init__() # *args, **kwargs
+        super().__init__()
 
         self.root_path = Path(root) / embedding_mode
         self.data_df = data_df
@@ -343,10 +366,6 @@ class CnvDataset(Dataset):
         return self.data_df.shape[0]
 
     def __getitem__(self, idx, **kwargs):
-        # TODO: 
-        # - change to torch.Tensor output type
-        # - make return type choosable numpy or torch tensor
-        # - dtype=self.dtype
 
         return (
             self._get_embedding(
@@ -364,16 +383,12 @@ class CnvDataset(Dataset):
             self.__class__, len(self), self.data_df.head()
         )
 
-    def class_balance(self):
+    def class_balance(self, counts=True):
         assert self.target_type == 'classification', \
             'Only class balance for classification'
-        return self.data_df[self.target_type].unique()
-        # TODO: count class labels and divide by
-
-    # def split(self, train, test, val=None):
-    #     """
-    #     Function to create training, validation and test splits.
-    #     """
-    #     # TODO: write function to make test/val/train splits
-    #     pass
+        class_counts = self.data_df[self.target_type].value_counts()
+        if counts:
+            return class_counts
+        else:
+            return class_counts / self.data_df.shape[0]
                 
