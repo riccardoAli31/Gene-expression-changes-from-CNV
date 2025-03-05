@@ -31,8 +31,8 @@ class CnvDataset(Dataset):
 
     def __init__(self, root, data_df: DataFrame, *args,
                  force_recompute=False, embedding_mode='single_gene_barcode',
-                 file_format='mtx', use_gzip=False, verbose=1, 
-                 dtype=float32, target_type='classification', **kwargs):
+                 file_format='mtx', use_gzip=False, verbose=1, dtype=float32, 
+                 target_type='classification', return_numpy=False, **kwargs):
         """
         Initialization funciton.
         Computes embeddings from raw data, if needed. In this case use kwargs:
@@ -71,6 +71,7 @@ class CnvDataset(Dataset):
         self.file_format = file_format
         self.compress = use_gzip
         self.dtype = dtype
+        self.return_numpy=return_numpy
         if target_type == 'classification':
             self.target_type = target_type
         elif target_type == 'regression':
@@ -91,9 +92,6 @@ class CnvDataset(Dataset):
         if not self.root_path.exists():
             self.root_path.mkdir(parents=True)
 
-        # define merge_df variable here to overwrite later
-        merge_df = None
-
         if recompute:
             if verbose > 0:
                 print('Recomputing embeddings: ', recompute)
@@ -110,8 +108,6 @@ class CnvDataset(Dataset):
                 gtf_path=kwargs.get('gtf_path'),
                 atac_path=kwargs.get('atac_path'),
                 cnv_path=kwargs.get('cnv_path'),
-                # gene_set=gene_ids,
-                # barcode_set=barcode_ids,
                 barcodes_to_genes=barcodes_to_genes,
                 verbose=(verbose > 2)
             )
@@ -148,44 +144,11 @@ class CnvDataset(Dataset):
             )
         
         else:
-            # TODO: only create paths for data_df and check if they exist
+            # only create paths for data_df and check if they exist
             self.data_df['embedding_path'] = [
                 self.ids_to_emb_path(b, g) for b, g in 
                 self.data_df[['barcode', 'gene_id']].itertuples(index=False)
             ]
-
-            # # approach to get ids from existing paths
-            # # filter data points by file paths from directory traversion
-            # file_list = list()
-            # if embedding_mode == 'single_gene_barcode':
-            #     file_list = [
-            #         f for d in self.root_path.iterdir() for f in d.iterdir()
-            #         if f.name.split('.')[-1] == self.file_format
-            #     ]
-            # else:
-            #     file_list = [
-            #         f for f in self.root_path.iterdir()
-            #         if f.name.split('.')[-1] == self.file_format
-            #     ]
-
-            # # create dataframe with file found on disk
-            # record_list = [self.emb_path_to_ids(p) for p in file_list]
-            # emb_on_disk_df = DataFrame.from_records(record_list)
-            # emb_on_disk_df['embedding_path'] = file_list
-
-            # if verbose > 1:
-            #     print('emb_on_disk_df')
-            #     print(emb_on_disk_df)
-            #     print('CnVDataset.data_df')
-            #     print(self.data_df)
-
-            # # merge data
-            # merge_df = merge(
-            #     self.data_df,
-            #     emb_on_disk_df,
-            #     how='outer',
-            #     on=['barcode', 'gene_id']
-            # )
 
         # report missing/unused embeddings for both cases
         if verbose > 2:
@@ -208,29 +171,13 @@ class CnvDataset(Dataset):
         
         self.data_df = self.data_df.drop(missing_df.index)
 
-        # missing_df = merge_df[merge_df['embedding_path'].isna()]
-        # if missing_df.shape[0] > 0:
-        #     print('No embedding files for {} data points in {}!'.format(
-        #         missing_df.shape[0], self.root_path
-        #     ))
-        #     if verbose > 2:
-        #         print(missing_df)
-        # elif missing_df.shape[0] == self.data_df.shape[0]:
-        #     raise RuntimeError('No embedding files found!')
-        
-        # # print unused
-        # unused_df = merge_df[merge_df[self.target_type].isna()]
-        # if unused_df.shape[0] > 0:
-        #     print('Found {} embedding files with no target value in {}!'.format(
-        #         unused_df.shape[0], self.root_path
-        #     ))
-        #     if verbose > 2:
-        #         print(unused_df)
-        
-        # self.data_df = merge_df.loc[
-        #     merge_df['embedding_path'].apply(lambda p: p.exists()) &
-        #     ~merge_df[self.target_type].isna()
-        # ]
+        # define class to label matching if we have a classification
+        if self.target_type == 'classification':
+            self.class_to_label = {
+                c: i for i, c in 
+                enumerate(self.data_df[self.target_type].unique())
+            }
+            self.label_to_class = {i: c for c, i in self.class_to_label.items()}
 
     def ids_to_emb_path(self, barcode: str, gene_id: str, mkdir=False) -> Path:
         """
@@ -292,10 +239,13 @@ class CnvDataset(Dataset):
                 mmwrite(file, embedding, field='integer')
     
     @staticmethod
-    def _load_embedding(file_path: Path, dtype=uint8) -> Tensor:
+    def _load_embedding(file_path: Path, **kwargs):
         """
         Load an embedding from file depending on the file format.
         """
+
+        dtype = kwargs.get('dtype', uint8)
+        return_numpy = kwargs.get('return_numpy', False)
 
         file_format = file_path.name.split('.')[-1]
         if file_format == 'gz':
@@ -304,12 +254,13 @@ class CnvDataset(Dataset):
 
         match file_format:
             case 'pt':
-                try:
+                    if return_numpy:
+                        return pyt_load(file_path).to(dtype).numpy
                     return pyt_load(file_path).to(dtype)
-                except BaseExceptionGroup as e:
-                    raise e.add_note('could not read file {}'.format(file_path))
             case 'mtx':
                 try:
+                    if return_numpy:
+                        return mmread(file_path)
                     return pyt_from_numpy(mmread(file_path)).to(dtype)
                 except ValueError as e:
                     raise e.add_note('could not read file {}'.format(file_path))
@@ -340,7 +291,8 @@ class CnvDataset(Dataset):
         return rows
 
     @staticmethod
-    def _get_embedding(data_df, idx: int, rows:Union[List[int], None]=None):
+    def _get_embedding(data_df, idx: int, rows:Union[List[int], None]=None,
+                       **kwargs):
         """
         Loads embeddings from file and filters rows.
 
@@ -352,14 +304,13 @@ class CnvDataset(Dataset):
         """
 
         file_path = data_df.iloc[idx]['embedding_path']
-        embedding = CnvDataset._load_embedding(file_path)
+        embedding = CnvDataset._load_embedding(file_path, **kwargs)
 
         if rows is not None:
             return embedding[rows,:]
         return embedding
 
-    @staticmethod
-    def _get_grund_truth(data_df: DataFrame, idx: int, target_type: str):
+    def _get_grund_truth(self, idx: int):
         """
         Return the ground truth respective to regression or classification.
 
@@ -375,16 +326,34 @@ class CnvDataset(Dataset):
             value of
         """
         
-        return data_df.iloc[idx][target_type]
+        if self.target_type == 'classification':
+            label = self.class_to_label[self.data_df.iloc[idx][self.target_type]]
+            label = Tensor([label]).to(self.dtype)
+            if self.return_numpy:
+                return label.numpy()
+            return label
+        else:
+            # regression case
+            if self.return_numpy:
+                return self.data_df.iloc[idx][self.target_type]
+            else:
+                return Tensor([self.data_df.iloc[idx][self.target_type]])
 
     def __len__(self):
         return self.data_df.shape[0]
 
-    def __getitem__(self, idx):
-        # TODO: change to torch.Tensor output type
+    def __getitem__(self, idx, **kwargs):
+        # TODO: 
+        # - change to torch.Tensor output type
+        # - make return type choosable numpy or torch tensor
+        # - dtype=self.dtype
+
         return (
-            self._get_embedding(self.data_df, idx), #TODO: dtype=self.dtype
-            self._get_grund_truth(self.data_df, idx, self.target_type)
+            self._get_embedding(
+                self.data_df, idx, dtype=self.dtype,
+                return_numpy=self.return_numpy, **kwargs
+                ),
+            self._get_grund_truth(idx)
         )
 
     def __repr__(self):
