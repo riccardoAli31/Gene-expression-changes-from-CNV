@@ -876,8 +876,9 @@ class Embedder(object):
 	* parallelize embedding computation on genomic level
 	"""
 
-	def __init__(self, fasta_path: Path, gtf_path: Path, atac_path: Path, 
-				cnv_path: Path, mode:str='single_gene_barcode',
+	def __init__(self, fasta_path: Union[Path, str], gtf_path: Union[Path, str],
+				atac_path: Union[Path, str], cnv_path: Union[Path, str],
+				mode:str='single_gene_barcode',
 				barcodes_to_genes: Union[Dict[str, List[str]], None]=None,
 				barcode_set: Union[Set[str], None]=None,
 				gene_set: Union[Set[str], None]=None, verbose=False,
@@ -914,19 +915,19 @@ class Embedder(object):
 		gtf_path : None or str path to .gtf annotation file
 		"""
 		
-		assert fasta_path.is_file(), 'FASTA not found: {}'.format(fasta_path)
-		assert gtf_path.is_file(), 'GTF not found: {}'.format(gtf_path)
-		assert atac_path.is_file(), 'Overlaps not found: {}'.format(atac_path)
-		assert cnv_path.is_file(), 'CNV file not found: {}'.format(cnv_path)
+		assert Path(fasta_path).is_file(), 'FASTA not found: {}'.format(fasta_path)
+		assert Path(gtf_path).is_file(), 'GTF not found: {}'.format(gtf_path)
+		assert Path(atac_path).is_file(), 'Overlaps not found: {}'.format(atac_path)
+		assert Path(cnv_path).is_file(), 'CNV file not found: {}'.format(cnv_path)
 		assert mode == 'single_gene_barcode', \
 			'[Embedder]: Only supporting "single_gene_barcode" mode for now!'
 		
 		self.mode = mode
 		self.embedding_size = (n_upstream, n_downstream)
-		self.fasta_path = fasta_path
-		self.gtf_path = gtf_path
-		self.atac_path = atac_path
-		self.cnv_path = cnv_path
+		self.fasta_path = Path(fasta_path)
+		self.gtf_path = Path(gtf_path)
+		self.atac_path = Path(atac_path)
+		self.cnv_path = Path(cnv_path)
 		self.dtype = dtype
 		self.ignore_missing_cnv = True
 		self.ignore_missing_atac = False
