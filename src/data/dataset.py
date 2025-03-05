@@ -2,8 +2,10 @@
 from typing import Union, List, Dict
 from pathlib import Path
 from pandas import DataFrame, merge
-from numpy import ndarray, uint8
+from numpy import ndarray
 from torch import (
+    uint8,
+    float32,
     Tensor,
     save as pyt_save,
     load as pyt_load,
@@ -30,7 +32,7 @@ class CnvDataset(Dataset):
     def __init__(self, root, data_df: DataFrame, *args,
                  force_recompute=False, embedding_mode='single_gene_barcode',
                  file_format='mtx', use_gzip=False, verbose=1, 
-                 dtype=uint8, target_type='classification', **kwargs):
+                 dtype=float32, target_type='classification', **kwargs):
         """
         Initialization funciton.
         Computes embeddings from raw data, if needed. In this case use kwargs:
@@ -287,7 +289,7 @@ class CnvDataset(Dataset):
             case 'pt':
                 pyt_save(pyt_from_numpy(embedding), file)
             case 'mtx':
-                mmwrite(file, embedding)
+                mmwrite(file, embedding, field='integer')
     
     @staticmethod
     def _load_embedding(file_path: Path, dtype=uint8) -> Tensor:
@@ -302,9 +304,15 @@ class CnvDataset(Dataset):
 
         match file_format:
             case 'pt':
-                return pyt_load(file_path).to(dtype)
+                try:
+                    return pyt_load(file_path).to(dtype)
+                except BaseExceptionGroup as e:
+                    raise e.add_note('could not read file {}'.format(file_path))
             case 'mtx':
-                return pyt_from_numpy(mmread(file_path)).to(dtype)
+                try:
+                    return pyt_from_numpy(mmread(file_path)).to(dtype)
+                except ValueError as e:
+                    raise e.add_note('could not read file {}'.format(file_path))
         raise RuntimeError('Unsupported file format: {}'.format(file_format))
 
     @staticmethod
@@ -362,6 +370,9 @@ class CnvDataset(Dataset):
             'classification' are the regression and classification targets.
         idx : int of index in data_df
         type : str, one of 'expression_count' or 'classification'
+
+        returns: Tuple[torch.Tensor, torch.Tensor] of the embedding and the target
+            value of
         """
         
         return data_df.iloc[idx][target_type]
@@ -369,11 +380,12 @@ class CnvDataset(Dataset):
     def __len__(self):
         return self.data_df.shape[0]
 
-    def __getitem__(self, idx, **kwargs):
-        return {
-            'embedding': self._get_embedding(self.data_df, idx, **kwargs),
-            'target': self._get_grund_truth(self.data_df, idx, self.target_type)
-        }
+    def __getitem__(self, idx):
+        # TODO: change to torch.Tensor output type
+        return (
+            self._get_embedding(self.data_df, idx), #TODO: dtype=self.dtype
+            self._get_grund_truth(self.data_df, idx, self.target_type)
+        )
 
     def __repr__(self):
         return '{} with {} datapoints'.format(self.__class__, len(self))
