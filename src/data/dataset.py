@@ -2,7 +2,7 @@
 from typing import Union, List, Dict
 from pathlib import Path
 from pandas import DataFrame, merge
-from numpy import ndarray
+from numpy import ndarray, array_equal
 from torch import (
     uint8,
     float32,
@@ -16,6 +16,7 @@ from scipy.io import mmread, mmwrite
 from .embedding import Embedder
 import gzip
 from warnings import warn
+from tqdm import tqdm
 
 
 class CnvDataset(Dataset):
@@ -40,7 +41,7 @@ class CnvDataset(Dataset):
     """
 
     def __init__(self, root, data_df: DataFrame, force_recompute=False,
-                 embedding_mode='single_gene_barcode', file_format='mtx',
+                 embedding_mode='single_gene_barcode', file_format='pt',
                  use_gzip=False, verbose=1, dtype=float32, return_numpy=False, 
                  target_type='classification', **kwargs):
         """
@@ -278,7 +279,7 @@ class CnvDataset(Dataset):
         match file_format:
             case 'pt':
                     if return_numpy:
-                        return pyt_load(file_path).to(dtype).numpy
+                        return pyt_load(file_path).to(dtype).numpy()
                     return pyt_load(file_path).to(dtype)
             case 'mtx':
                 try:
@@ -366,7 +367,6 @@ class CnvDataset(Dataset):
         return self.data_df.shape[0]
 
     def __getitem__(self, idx, **kwargs):
-
         return (
             self._get_embedding(
                 self.data_df, idx, dtype=self.dtype,
@@ -374,6 +374,18 @@ class CnvDataset(Dataset):
                 ),
             self._get_grund_truth(idx)
         )
+        
+    def get_with_ids(self, idx, **kwargs):
+        return (
+                self.data_df.iloc[idx]['barcode'],
+                self.data_df.iloc[idx]['gene_id'],
+                self._get_embedding(
+                self.data_df, idx, dtype=self.dtype,
+                return_numpy=self.return_numpy, **kwargs
+                ),
+                self._get_grund_truth(idx)
+            )
+
 
     def __repr__(self):
         return '{} with {} datapoints'.format(self.__class__, len(self))
@@ -391,4 +403,57 @@ class CnvDataset(Dataset):
             return class_counts
         else:
             return class_counts / self.data_df.shape[0]
-                
+
+    def convert_file_format(self, old_format: str, new_format: str, 
+                            convert=True, check=True, remove_old=False):
+        supported_formats = ('mtx', 'pt')
+        assert old_format in supported_formats and \
+            new_format in supported_formats, 'Unsupported format!'
+        assert old_format != new_format, 'Not converting to same format!'
+
+        if convert:
+            print('Converting files from .{} to .{}'.format(
+                old_format, new_format
+            ))
+            for i in tqdm(range(len(self))):
+                barcode, gene_id, embedding, _ = self.get_with_ids(i)
+                path = self.ids_to_emb_path(barcode, gene_id)
+                new_path = Path(str(path).replace(old_format, new_format))
+                self._save_embedding(embedding, new_path)
+
+        if check:
+            old_return_numpy = self.return_numpy
+            self.return_numpy = True
+            print('Sanity checking new files.')
+            if remove_old:
+                print('Removing old files after sanity check.')
+            new_dataset = CnvDataset(
+                root=self.root_path.parent,
+                data_df=self.data_df,
+                file_format=new_format,
+                return_numpy=self.return_numpy
+            )
+            for i in tqdm(range(len(self))):
+                b_old, g_old, e_old, _ = self.get_with_ids(i)
+                b_new, g_new, e_new, _ = new_dataset.get_with_ids(i)
+                assert b_old == b_new and g_old == g_new, \
+                    'ID mismatch {}: {}, {} != {}, {}'.format(
+                        i, b_old, g_old, b_new, g_new
+                    ) # TODO: check array_equal(Tensor, Tensor)
+                assert array_equal(e_old, e_new), \
+                    'Array mismatch for {}: {}, {}; {} ?= {}\n{}\n{}'.format(
+                        i, b_old, g_old, e_old.dtype, e_new.dtype, e_old, e_new
+                    )
+        
+                if remove_old:
+                    old_path = self.ids_to_emb_path(b_old, g_old)
+                    if old_path.is_file():
+                        old_path.unlink()
+            
+            print('All files checked.')
+            if remove_old:
+                print('All old files removed.')
+            
+            self.return_numpy = old_return_numpy
+
+
