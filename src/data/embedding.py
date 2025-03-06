@@ -934,11 +934,14 @@ class Embedder(object):
 
 		# === GTF ANNOTATION ===
 		# use pyranges to read annotation from .gtf and pandas to read from .csv
-		if gtf_path.name.split('.')[-1] == 'gtf':
+		if self.gtf_path.name.strip('.gz').split('.')[-1] == 'gtf':
 			gtf_pr = read_gtf(gtf_path)
 			self.gene_pr = gtf_pr[gtf_pr.Feature == 'gene']\
 				[['Chromosome', 'Start', 'End', 'gene_id']].unstrand()
-		elif gtf_path.name.split('.')[-1] == 'csv':
+			self.gene_pr = self.gene_pr[self.gene_pr.Chromosome.isin(
+				standard_chromosomes
+				)]
+		elif self.gtf_path.name.split('.')[-1] == 'csv':
 			gene_df = read_csv(gtf_path)
 			gene_df = gene_df.rename(columns={
 				'seqnames': 'Chromosome', 'start': 'Start', 'end': 'End'
@@ -988,7 +991,7 @@ class Embedder(object):
 		# get sequence from fasta file
 		self.gene_pr.Sequence = get_sequence(self.gene_pr, fasta_path)
 		if verbose:
-			print('[Embedder]:\n', self.gene_pr)
+			print('[Embedder]: self.gene_pr\n', self.gene_pr)
 
 		# ==== OPEN CHROMATIN ====
 		# load open chromatin peaks
@@ -1034,7 +1037,10 @@ class Embedder(object):
 		self.cnv_pr = self.gene_pr.join(cnv_df)
 		
 		if verbose:
-			print('[Embedder]:\n', self.cnv_pr)
+			print('[Embedder]: self.cnv_pr\n', self.cnv_pr)
+		
+		if self.cnv_pr.empty and self.ignore_missing_cnv:
+			raise RuntimeError('No CNV data overlapping with selected genes!')
 
 		# ==== Iteration Mapping ====
 		# create list of tuples based on barcode_to_genes dict
