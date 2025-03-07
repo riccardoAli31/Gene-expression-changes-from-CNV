@@ -1,17 +1,17 @@
 #! /usr/bin/python
 
 """
-Script to compute embeddings for batch 2 validation split.
+Script to compute embeddings for batch 2 training split.
 """
 
 import pandas as pd
 from pathlib import Path
 import sys
-sys.path.append('..')
+sys.path.append('../..')
 from src.data.dataset import CnvDataset
 
 # file paths
-git_root = Path('..')
+git_root = Path('..'/'..')
 data_root = git_root / 'data'
 out_root = git_root / 'out'
 assert data_root.exists()
@@ -24,11 +24,11 @@ assert overlap_path.exists()
 epiAneufinder_path = out_root / 'epiAneufinder' / 'epiAneuFinder_results.tsv'
 assert epiAneufinder_path.exists()
 
-# batch 2 val
-b2_val_path = data_root / 'splits' / 'batch2_val_filtered.tsv'
-df = pd.read_csv(b2_val_path, sep='\t')
+# batch 2 train
+b2_train_path = data_root / 'splits' / 'batch2_training_filtered.tsv'
+df = pd.read_csv(b2_train_path, sep='\t')
 dataset = CnvDataset(
-    root=data_root / 'embeddings' / 'batch_2' / 'val_pt',
+    root=data_root / 'embeddings' / 'batch_2' / 'training_pt',
     data_df=df,
     fasta_path=genome_fasta,
     gtf_path=gtf_path,
@@ -36,5 +36,4 @@ dataset = CnvDataset(
     cnv_path=epiAneufinder_path,
     embedding_mode='single_gene_barcode',
     force_recompute=True,
-    file_format='pt'
 )
