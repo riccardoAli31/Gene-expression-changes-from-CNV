@@ -456,4 +456,47 @@ class CnvDataset(Dataset):
             
             self.return_numpy = old_return_numpy
 
+    def split(self, cell_type_df: DataFrame, best_barcodes=None):
+        """
+        TODO: split existing data based on cell type, barcode and class
+        """
+        from sklearn.model_selection import train_test_split
 
+        # TODO: visualiuze distributions before split
+        
+        if best_barcodes is not None:
+            assert len(set(best_barcodes).intersection(set(self.data_df['barcode']))) > 0
+            self.data_df = self.data_df[self.data_df['barcode'].isin(best_barcodes)]
+
+        merge_df = merge(
+            self.data_df, cell_type_df, on='barcode'
+        )
+
+        # create compined class labels with cell type and expression class
+        merge_df['label'] = merge_df['classification'] + merge_df['celltype']
+
+        # TODO: problem is that gene lists per barcode are inequal of size
+        # -> idea make categories by gene list size and distribute evenly for splits
+        # -> not truly random split anymore
+
+        # all_barcodes = merge_df['barcode'].unique()
+        training_barcodes, test_barcodes = train_test_split(
+            merge_df[['barcode', 'gene_id']],
+            test_size=0.2,
+            random_state=2,
+            stratify=merge_df['label']
+        )
+        train_barcodes, val_barcodes = train_test_split(
+            training_barcodes,
+            test_size=10/80,
+            random_state=2,
+            stratify=merge_df[merge_df.index.isin(training_barcodes.index)]['label']
+        )
+
+        # TODO: visualize distribution of splits
+        
+        return (
+            merge_df[merge_df.index.isin(train_barcodes)],
+            merge_df[merge_df.index.isin(val_barcodes)],
+            merge_df[merge_df.index.isin(test_barcodes)],
+        )
