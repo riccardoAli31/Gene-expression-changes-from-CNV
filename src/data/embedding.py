@@ -1046,11 +1046,17 @@ class Embedder(object):
 		# create list of tuples based on barcode_to_genes dict
 		gene_barcode_pairs = list()
 		n_embeddings = 0
+		# TODO: tally missed embeddings per category
+		n_missed_no_gtf = 0
+		n_missed_no_cnv_barcode = 0
+		n_missed_no_cnv_overlap = 0
 		if barcodes_to_genes is not None:
 			n_embeddings = len([
 				g for gl in barcodes_to_genes.values() for g in gl 
 				if g in uniq_gene_ids
 			])
+			n_missed_no_gtf = sum(map(len, barcodes_to_genes.values())) -\
+				n_embeddings
 			print('[Embedder]: Iterating over custom barcode to genes mapping')
 			iter_barcode_set = set(barcodes_to_genes.keys())
 			uniq_barcodes = uniq_barcodes.intersection(iter_barcode_set)
@@ -1119,7 +1125,8 @@ class Embedder(object):
 
 		self.prev_gene_id = None
 		self.dna_embedding = None
-		self.cnv_missing = 0
+		self.cnv_missing = list()
+		self.verbose = verbose
 
 	def __len__(self):
 		return self.n_embeddings
@@ -1131,10 +1138,16 @@ class Embedder(object):
 		try:
 			gene_id, barcode = next(self.embegging_iterator)
 		except StopIteration:
-			if self.cnv_missing > 0:
-				print('[Embedder]: skipped {} embeddings missing CNV data'\
+			if len(self.cnv_missing) > 0:
+				warn('[Embedder]: skipped {} embeddings missing CNV data'\
 		  			.format(self.cnv_missing)
 				)
+				if self.verbose:
+					print('No CNV data for these barcode - gene combinations:')
+					print('\t'.join([
+						lambda t: '({},{})'.format(t) for t in self.cnv_missing
+					]))
+
 			self.pbar.close()
 			raise StopIteration()
 		
@@ -1164,8 +1177,7 @@ class Embedder(object):
 		# get CNV embedding; if no CNV data existent, skip this embedding
 		cnv_region = self.cnv_pr[self.cnv_pr.gene_id == gene_id][[barcode]]
 		if cnv_region.intersect(gene_region).empty and self.ignore_missing_cnv:
-			warn('No CNV data for {} and {}'.format(barcode, gene_id))
-			self.cnv_missing += 1
+			self.cnv_missing.append((barcode, gene_id))
 			return self.__next__()
 		
 		cnv_embedding = get_cnv_embedding(
