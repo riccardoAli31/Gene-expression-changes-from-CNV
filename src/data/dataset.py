@@ -189,7 +189,7 @@ class CnvDataset(Dataset):
                 missing_df.shape[0], self.root_path
             ))
             if verbose > 1:
-                print(missing_df['embedding_path'][0])
+                print(missing_df['embedding_path'])
         elif missing_df.shape[0] == self.data_df.shape[0]:
             raise RuntimeError('No embedding files found!')
         
