@@ -102,6 +102,11 @@ class CnvDataset(Dataset):
             self.target_type = 'expression_count'
         else:
             raise RuntimeError('Unknown target type: {}'.format(target_type))
+        self.embedding_rows = self._subset_embedding_rows(
+            dna=kwargs.get('include_dna', True),
+            atac=kwargs.get('include_atac', True),
+            cnv=kwargs.get('include_cnv', True)
+        )
 
         recompute = force_recompute or not self.root_path.exists()
 
@@ -290,8 +295,7 @@ class CnvDataset(Dataset):
                     raise e.add_note('could not read file {}'.format(file_path))
         raise RuntimeError('Unsupported file format: {}'.format(file_format))
 
-    @staticmethod
-    def _subset_embedding_rows(n_rows: int, dna=True, atac=True, cnv=True):
+    def _subset_embedding_rows(self, dna=True, atac=True, cnv=True):
         """
         Create a list to filter rows of an embedding.
         
@@ -301,6 +305,7 @@ class CnvDataset(Dataset):
         cnv : bool if include CNV encoding rows (5 and 6)
         """
 
+        n_rows = 7
         rows = list()
         if dna:
             rows.extend([0, 1, 2, 3])
@@ -370,7 +375,8 @@ class CnvDataset(Dataset):
         return (
             self._get_embedding(
                 self.data_df, idx, dtype=self.dtype,
-                return_numpy=self.return_numpy, **kwargs
+                return_numpy=self.return_numpy, 
+                rows=self.embedding_rows, **kwargs
                 ),
             self._get_grund_truth(idx)
         )
@@ -385,7 +391,6 @@ class CnvDataset(Dataset):
                 ),
                 self._get_grund_truth(idx)
             )
-
 
     def __repr__(self):
         return '{} with {} datapoints'.format(self.__class__, len(self))
