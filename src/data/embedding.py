@@ -299,8 +299,8 @@ def get_atac_embedding(peak_regions: PyRanges, embedding_start: int,
 	
 	if peak_regions.empty:
 		return zeros((1, embedding_length), dtype=kwargs.get('dtype','u1'))
-	elif peak_regions.df.shape[0] == 1:
-		return ones((1, embedding_length), dtype=kwargs.get('dtype','u1'))
+	# elif peak_regions.df.shape[0] == 1:
+	# 	return ones((1, embedding_length), dtype=kwargs.get('dtype','u1'))
 	else:
 		emb = zeros((1, embedding_length), dtype=kwargs.get('dtype','u1'))
 		for _, peak in peak_regions.df.iterrows():
