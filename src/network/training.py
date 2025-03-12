@@ -1,3 +1,6 @@
+from pathlib import Path
+import pandas as pd
+import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -34,11 +37,18 @@ class EarlyStopping:
 def create_tqdm_bar(iterable, desc):
     return tqdm(enumerate(iterable),total=len(iterable), ncols=150, desc=desc)
 
+
 def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
-                val_loader: DataLoader, tb_logger, device, name='default'):
+                val_loader: DataLoader, tb_logger, device, model_path: Path,
+                model_name: str, plot_path: Path):
     """
     Model training function.
     """
+    
+    assert model_path.is_dir(), \
+        'Directory for saving model, doesn\'t exist:\n{}'.format(model_path)
+    assert plot_path.is_dir(), \
+        'Directory for saving plots doesn\'t exists:\n{}'.format(plot_path)
     
     optimizer = optim.Adam(
         model.parameters(),
@@ -75,7 +85,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
 
             optimizer.zero_grad()
 
-            with autocast(device_type=device):
+            with autocast(device_type=str(device)):
                 outputs = model(stacked_inputs_batch)
                 loss = criterion(outputs, y_batch)
             
@@ -94,7 +104,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
 
             # update the tensorboard logger.
             tb_logger.add_scalar(
-                f'CNV_model_{name}/train_loss', loss.item(), 
+                f'CNV_model_{model_name}/train_loss', loss.item(), 
                 epoch * len(train_loader) + train_i
                 )
             
@@ -102,7 +112,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
         train_losses_avg.append(avg_train_loss)
 
         tb_logger.add_scalar(
-            f'CNV_model_{name}/avg_train_loss', avg_train_loss, epoch
+            f'CNV_model_{model_name}/avg_train_loss', avg_train_loss, epoch
             )
 
         # validation
@@ -120,7 +130,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
                 stacked_inputs_batch = stacked_inputs_batch.to(device)
                 y_batch = y_batch.to(device) # , non_blocking=True
 
-                with torch.no_grad(), autocast():
+                with autocast(device_type=str(device)):
                     y_pred = model(stacked_inputs_batch)
                     loss = criterion(y_pred, y_batch)
                     val_losses.append(loss.item())
@@ -135,7 +145,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
 
                 # update the tensorboard logger.
                 tb_logger.add_scalar(
-                    f'CNV_model_{name}/val_loss', loss.item(), 
+                    f'CNV_model_{model_name}/val_loss', loss.item(), 
                     epoch * len(val_loader) + val_i
                     )
 
@@ -143,13 +153,13 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
             val_losses_avg.append(avg_val_loss)
 
             tb_logger.add_scalar(
-                f'CNV_model_{name}/avg_val_loss', avg_val_loss, epoch
+                f'CNV_model_{model_name}/avg_val_loss', avg_val_loss, epoch
             )
 
             # accuracy
             val_accuracy = accuracy_score(all_val_predictions, all_val_labels)
             tb_logger.add_scalar(
-                f'CNV_model_{name}/val_acc', val_accuracy, epoch
+                f'CNV_model_{model_name}/val_acc', val_accuracy, epoch
             )
 
             if avg_val_loss < best_val_loss:
@@ -164,20 +174,27 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
         # This value is used for the progress bar of the training loop.
         validation_loss /= len(val_loader)
 
-    # plot_df = pd.DataFrame({
-    #     'epoch': list(range(len(train_losses_avg[1:]))) * 2,
-    #     'avg_train_loss': train_losses_avg[1:],
-    #     'avg_val_loss': val_losses_avg[1:]
-    #     })
-    # p = ggplot(data=plot_df, mapping=aes(x='epoch')) +\
-    #     geom_line(aes(y='avg_train_loss', color='Train loss')) +\
-    #     geom_line(aes(y='avg_val_loss'), color='Val loss') +\
-    #     labs(title='Average Loss during training', x='Epoch', y='Avg. Loss')
-    # TODO: ggsave
+    # save best model
+    torch.save(
+        {'model_state_dict': model.state_dict(),},
+        model_path / (model_name + '.pth')
+        )
+
+    plot_df = pd.DataFrame({
+        'epoch': list(range(len(train_losses_avg[1:]))) * 2,
+        'avg_loss': np.hstack([train_losses_avg[1:], val_losses_avg[1:]]),
+        'split': ['train'] * len(train_losses_avg[1:]) +\
+            ['val'] * len(val_losses_avg[1:])
+        })
+    p = ggplot(data=plot_df, mapping=aes(x='epoch', y='avg_loss')) +\
+        geom_line(aes(color='split')) +\
+        geom_line(aes(color='split')) +\
+        labs(
+            title='Average Loss training {}'.format(model_name),
+            x='Epoch',
+            y='Avg. Loss'
+            )
+    ggsave(p, plot_path / (model_name + '_avg_loss.png'))
     p.show()
-    plt.plot(train_losses_avg[1:], label='Train Loss')
-    plt.plot(val_losses_avg[1:], label='Val Loss')
-    plt.legend()
-    plt.show()
             
     return avg_val_loss, best_model
