@@ -1,15 +1,17 @@
 from torch import nn, optim
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 def create_tqdm_bar(iterable, desc):
     return tqdm(enumerate(iterable),total=len(iterable), ncols=150, desc=desc)
 
-def train_model(model, train_loader: DataLoader, val_loader: DataLoader, tb_logger, name='default'):
+def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
+                val_loader: DataLoader, tb_logger, device, name='default'):
     """
     Model training function.
     """
     
-    optimizer = torch.optim.Adam(
+    optimizer = optim.Adam(
         model.parameters(),
         lr=hparams.get('lr', 1e-3)
     )
