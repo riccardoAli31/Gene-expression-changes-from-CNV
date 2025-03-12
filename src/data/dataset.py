@@ -295,7 +295,8 @@ class CnvDataset(Dataset):
                     raise e.add_note('could not read file {}'.format(file_path))
         raise RuntimeError('Unsupported file format: {}'.format(file_format))
 
-    def _subset_embedding_rows(self, dna=True, atac=True, cnv=True):
+    @staticmethod
+    def _subset_embedding_rows(dna=True, atac=True, cnv=True):
         """
         Create a list to filter rows of an embedding.
         
@@ -505,3 +506,26 @@ class CnvDataset(Dataset):
             merge_df[merge_df.index.isin(val_barcodes)],
             merge_df[merge_df.index.isin(test_barcodes)],
         )
+
+
+class CnvMemoryDataset(CnvDataset):
+    """
+    Dataset version that lives completely in memory.
+    TODO: implement
+    """
+
+    def __init__(self, root, data_df, force_recompute=False, 
+                 embedding_mode='single_gene_barcode', file_format='pt', 
+                 use_gzip=False, verbose=1, dtype=float32, return_numpy=False, 
+                 target_type='classification', **kwargs):
+        super().__init__(
+            root, data_df, force_recompute, embedding_mode, 
+            file_format, use_gzip, verbose, dtype, return_numpy, 
+            target_type, **kwargs)
+        
+        # TODO: check memory requirements
+
+        self.data = [d for d in super()]
+
+    def __getitem__(self, idx, **kwargs):
+        return super().__getitem__(idx, **kwargs)
