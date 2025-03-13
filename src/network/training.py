@@ -1,6 +1,5 @@
 from pathlib import Path
 import pandas as pd
-import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -8,11 +7,11 @@ from torch.amp import autocast
 from tqdm import tqdm
 import copy
 from sklearn.metrics import accuracy_score
-import matplotlib.pyplot as plt
+from plotnine import ggplot, aes, labs, geom_line, ggsave
 
 
 class EarlyStopping:
-    def _init_(self, patience=5, delta=0):
+    def __init__(self, patience=5, delta=0):
 
         self.patience = patience
         self.delta = delta
@@ -20,7 +19,7 @@ class EarlyStopping:
         self.early_stop = False
         self.counter = 0
 
-    def _call_(self, val_loss):
+    def __call__(self, val_loss):
         score = -val_loss
 
         if self.best_score is None:
@@ -134,8 +133,8 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
                     y_pred = model(stacked_inputs_batch)
                     loss = criterion(y_pred, y_batch)
                     val_losses.append(loss.item())
-                    all_val_predictions.append(y_pred)
-                    all_val_labels.append(y_batch)
+                    all_val_predictions.append(y_pred.round().int())
+                    all_val_labels.append(y_batch.int())
                 validation_loss += loss.item()
 
                 # update the progress bar with running average val loss
@@ -157,7 +156,10 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
             )
 
             # accuracy
-            val_accuracy = accuracy_score(all_val_predictions, all_val_labels)
+            val_accuracy = accuracy_score(
+                torch.concat(all_val_predictions), 
+                torch.concat(all_val_labels)
+                )
             tb_logger.add_scalar(
                 f'CNV_model_{model_name}/val_acc', val_accuracy, epoch
             )
@@ -182,7 +184,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
 
     plot_df = pd.DataFrame({
         'epoch': list(range(len(train_losses_avg[1:]))) * 2,
-        'avg_loss': np.hstack([train_losses_avg[1:], val_losses_avg[1:]]),
+        'avg_loss': train_losses_avg[1:] + val_losses_avg[1:],
         'split': ['train'] * len(train_losses_avg[1:]) +\
             ['val'] * len(val_losses_avg[1:])
         })

@@ -125,8 +125,8 @@ run_number = len([
     d for d in tb_log_path.iterdir() \
         if d.is_dir() and d.name.startswith(model_name)
     ])
+tb_log_path = tb_log_path / model_name / ('run' + str(run_number))
 model_name = '_'.join([model_name, 'run' + str(run_number)])
-tb_log_path = tb_log_path / model_name
 tb_logger = SummaryWriter(tb_log_path)
 
 # define training function
@@ -138,7 +138,7 @@ avg_val_loss, best_model = train_model(
     model=cnn_model, hparams=hparams, train_loader=train_loader,
     val_loader=val_loader, tb_logger=tb_logger, device=device,
     model_path=model_dir, model_name=model_name, plot_path=plot_path
-    )
+)
 
 # TODO: run evaluation
 test_data_root = data_root / 'embeddings' / batch_name / 'test'
