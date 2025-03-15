@@ -511,7 +511,9 @@ class CnvDataset(Dataset):
 class CnvMemoryDataset(CnvDataset):
     """
     Dataset version that lives completely in memory.
-    TODO: implement
+    At the moment this class only supports the pytroch DataLoader approach.
+
+    TODO: implement furhter functions
     """
 
     def __init__(self, root, data_df, force_recompute=False, 
@@ -522,10 +524,20 @@ class CnvMemoryDataset(CnvDataset):
             root, data_df, force_recompute, embedding_mode, 
             file_format, use_gzip, verbose, dtype, return_numpy, 
             target_type, **kwargs)
-        
-        # TODO: check memory requirements
 
-        self.data = [d for d in super()]
+        # TODO: check memory requirements
+        # import psutil
+        # psutil.virtual_memory()
+        # import os
+        # {l.split()[0].strip(':'): l.split()[1:] for l in os.popen('free').readlines()}['Mem']
+
+        # load all embeddings into memory
+        self.embeddings = [
+            super().__getitem__(i)[0].to_sparse() for i in range(len(self))
+        ]
 
     def __getitem__(self, idx, **kwargs):
-        return super().__getitem__(idx, **kwargs)
+        return (
+            self.embeddings[idx].to_dense(),
+            self._get_grund_truth(idx)
+        )
