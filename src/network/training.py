@@ -132,9 +132,10 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
                 with autocast(device_type=str(device)):
                     y_pred = model(stacked_inputs_batch)
                     loss = criterion(y_pred, y_batch)
-                    val_losses.append(loss.item())
-                    all_val_predictions.append(y_pred.round().int())
-                    all_val_labels.append(y_batch.int())
+                
+                val_losses.append(loss.item())
+                all_val_predictions.append(y_pred.round().int())
+                all_val_labels.append(y_batch.int())
                 validation_loss += loss.item()
 
                 # update the progress bar with running average val loss
@@ -168,9 +169,9 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
                 best_val_loss = avg_val_loss
                 best_model = copy.deepcopy(model.state_dict())
 
-            early_stopping(avg_val_loss)
+            early_stopping(avg_train_loss)
             if early_stopping.early_stop:
-                print("Early stopping triggered")
+                print('Early stopping after epoch {}'.format(epoch))
                 break
         
         # This value is used for the progress bar of the training loop.
@@ -178,7 +179,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
 
     # save best model
     torch.save(
-        {'model_state_dict': model.state_dict(),},
+        {'model_state_dict': best_model,},
         model_path / (model_name + '.pth')
         )
 
