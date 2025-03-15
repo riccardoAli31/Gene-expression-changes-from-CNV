@@ -95,7 +95,7 @@ import torch
 hparams = {
     'batch_size': 32,
     'epochs': EPOCHS,
-    'lr': 1e-3
+    'lr': 1e-4
 }
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
