@@ -39,7 +39,7 @@ def create_tqdm_bar(iterable, desc):
 
 def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
                 val_loader: DataLoader, tb_logger, device, model_path: Path,
-                model_name: str, plot_path: Path):
+                model_name: str, plot_path: Path, stop_early=True):
     """
     Model training function.
     """
@@ -170,7 +170,7 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
                 best_model = copy.deepcopy(model.state_dict())
 
             early_stopping(avg_train_loss)
-            if early_stopping.early_stop:
+            if stop_early and early_stopping.early_stop:
                 print('Early stopping after epoch {}'.format(epoch))
                 break
         
