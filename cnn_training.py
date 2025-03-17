@@ -32,13 +32,13 @@ elif len(sys.argv) > 7:
 print(sys.argv)
 
 # global variables
-from src.data.dataset import CnvDataset
+from src.data.dataset import CnvDataset, CnvMemoryDataset
 MODEL_NAME = sys.argv[1]
 BATCH = sys.argv[2]
 EPOCHS = int(sys.argv[3])
-INCLUDE_DNA = bool(sys.argv[4]) if len(sys.argv) > 4 else True
-INCLUDE_ATAC = bool(sys.argv[5]) if len(sys.argv) > 5 else True
-INCLUDE_CNV = bool(sys.argv[6]) if len(sys.argv) > 6 else True
+INCLUDE_DNA = bool(int(sys.argv[4])) if len(sys.argv) > 4 else True
+INCLUDE_ATAC = bool(int(sys.argv[5])) if len(sys.argv) > 5 else True
+INCLUDE_CNV = bool(int(sys.argv[6])) if len(sys.argv) > 6 else True
 SEQ_LEN = 10_000
 IN_DIM = len(CnvDataset._subset_embedding_rows(
     dna=INCLUDE_DNA, atac=INCLUDE_ATAC, cnv=INCLUDE_CNV
@@ -75,7 +75,7 @@ train_df = pd.read_csv(
     data_root / 'splits' / 'batch{}_training_filtered.tsv'.format(BATCH),
     sep='\t'
     )
-train_dataset = CnvDataset(
+train_dataset = CnvMemoryDataset(
     root=train_data_root, data_df=train_df, include_dna=INCLUDE_DNA,
     include_atac=INCLUDE_ATAC, include_cnv=INCLUDE_CNV
     )
@@ -84,7 +84,7 @@ print('Batch {} train loaded: {} data points'.format(BATCH, len(train_dataset)))
 val_df = pd.read_csv(
     data_root / 'splits' / 'batch{}_val_filtered.tsv'.format(BATCH), sep='\t'
     )
-val_dataset = CnvDataset(
+val_dataset = CnvMemoryDataset(
     root=val_data_root, data_df=val_df, include_dna=INCLUDE_DNA,
     include_atac=INCLUDE_ATAC, include_cnv=INCLUDE_CNV
     )
@@ -95,7 +95,7 @@ import torch
 hparams = {
     'batch_size': 32,
     'epochs': EPOCHS,
-    'lr': 1e-4
+    'lr': 1e-3
 }
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
