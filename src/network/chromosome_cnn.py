@@ -108,6 +108,8 @@ class ModifiedChromosomeCNN(nn.Module):
 
         self.se_block = SEBlock(128)
 
+        self.adaptive_pool = nn.AdaptiveAvgPool1d(output_size=200)
+
         self.fc1 = None
         self.fc2 = nn.Linear(128, output_dim)
 
@@ -125,6 +127,8 @@ class ModifiedChromosomeCNN(nn.Module):
         x = self.se_block(x)
 
         x = flatten(x, start_dim=1)
+
+        x = self.adaptive_pool(x)
 
         if self.fc1 is None:
             fc1_input_size = x.shape[1]
