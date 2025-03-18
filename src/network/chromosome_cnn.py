@@ -94,7 +94,7 @@ class MultiScaleConv(nn.Module):
 
 # 4. Full CNN Model with all modifications
 class ModifiedChromosomeCNN(nn.Module):
-    def __init__(self, input_dim, seq_len, output_dim):
+    def __init__(self, input_dim, seq_len, output_dim=1):
         super(ModifiedChromosomeCNN, self).__init__()
 
         self.input_dim = input_dim
@@ -109,7 +109,7 @@ class ModifiedChromosomeCNN(nn.Module):
         self.se_block = SEBlock(128)
 
         self.fc1 = None
-        self.fc2 = nn.Linear(128, 1)
+        self.fc2 = nn.Linear(128, output_dim)
 
     def initialize_fc1(self, x):
         if self.fc1 is None:
