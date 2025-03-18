@@ -20,7 +20,6 @@ class PromoterCNN(nn.Module):
         self.hparams = hparams
         self.in_dim = hparams.get('in_dim', 7)
         self.out_dim = hparams.get('out_dim', 1)
-        self.out_dim = self.out_dim # * hparams.get('batch_size')
 
         # promoter region: 2kb
         # in shape batch_size * 1 * 3 * 2000
