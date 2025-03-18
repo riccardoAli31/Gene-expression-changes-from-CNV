@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader
 from torch.amp import autocast
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from src.network.chromosome_cnn import ChromosomeCNN
+# from scipy.stats import spearmanr
+
 
 def test_model(model_path, test_loader, total_variables, seq_len, device):
 
