@@ -95,7 +95,7 @@ import torch
 hparams = {
     'batch_size': 32,
     'epochs': EPOCHS,
-    'lr': 1e-3
+    'lr': 1e-4
 }
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
@@ -107,8 +107,8 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
 # define model
-from src.network.chromosome_cnn import ChromosomeCNN
-cnn_model = ChromosomeCNN(
+from src.network.chromosome_cnn import ChromosomeCNN, ModifiedChromosomeCNN
+cnn_model = ModifiedChromosomeCNN(
     input_dim=IN_DIM, seq_len=SEQ_LEN, output_dim=OUT_DIM
     )
 model_name = '_'.join([MODEL_NAME, 'batch' + BATCH])
@@ -141,9 +141,9 @@ avg_val_loss, best_model = train_model(
 )
 
 # TODO: run evaluation
-test_data_root = data_root / 'embeddings' / batch_name / 'test'
-assert test_data_root.is_dir(), \
-    'Training data not found: {} not a directory'.format(test_data_root)
+# test_data_root = data_root / 'embeddings' / batch_name / 'test'
+# assert test_data_root.is_dir(), \
+#     'Training data not found: {} not a directory'.format(test_data_root)
 # from src.network.evaluation import test_model
 # test_loader = DataLoader(b1_test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
