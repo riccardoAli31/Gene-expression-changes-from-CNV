@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from torch.amp import autocast
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from src.network.chromosome_cnn import ChromosomeCNN
+from .training import create_tqdm_bar
 # from scipy.stats import spearmanr
 
 
@@ -26,18 +27,82 @@ def test_model(model_path, test_loader, total_variables, seq_len, device):
     all_labels = []
 
     with torch.no_grad():
-        for stacked_inputs_batch, y_batch in test_loader:
+        test_loop = create_tqdm_bar(
+            test_loader, desc=f'Testing'
+            )
+        for test_i, (stacked_inputs_batch, y_batch) in test_loop:
             stacked_inputs_batch = stacked_inputs_batch.to(device)
             y_batch = y_batch.to(device, non_blocking=True)
             #stacked_inputs_batch = stacked_inputs_batch.unsqueeze(0)
 
-            with autocast():
+            with autocast(device_type=str(device)):
                 outputs = model(stacked_inputs_batch)
                 loss = criterion(outputs, y_batch)
                 test_losses.append(loss.item())
 
-                all_predictions.append(outputs.cpu().numpy())
-                all_labels.append(y_batch.cpu().numpy())
+                all_predictions.append(outputs.cpu().round().int())
+                all_labels.append(y_batch.cpu().int())
+
+    avg_test_loss = sum(test_losses) / len(test_losses)
+    print(f"Test MSE: {avg_test_loss:.4f}")
+
+    all_predictions = np.concatenate(all_predictions, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+
+    probabilities = 1 / (1 + np.exp(-all_predictions))  # Sigmoid function
+    predicted_classes = (probabilities >= 0.5).astype(int)  # Convert to 0 or 1 based on threshold
+
+    # Compute accuracy and other metrics
+    accuracy = accuracy_score(all_labels, predicted_classes)
+    precision = precision_score(all_labels, predicted_classes)
+    recall = recall_score(all_labels, predicted_classes)
+    f1 = f1_score(all_labels, predicted_classes)
+    auc = roc_auc_score(all_labels, probabilities)
+
+    print(f'Accuracy: {accuracy:.4f}')
+    print(f'Precision: {precision:.4f}')
+    print(f'Recall: {recall:.4f}')
+    print(f'F1 Score: {f1:.4f}')
+    print(f'AUC: {auc:.4f}')
+    
+    return avg_test_loss
+
+
+def test_CNN_model(
+        model_path, model_class, hparams, test_loader, 
+        total_variables, seq_len, device):
+
+    model = model_class(hparams).to(device)
+    checkpoint = torch.load(model_path)
+    
+    input_tensor = torch.zeros(hparams.get('batch_size'), hparams.get('in_dim'), seq_len).to(device)
+    model(input_tensor)
+    
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    model.eval()
+
+    criterion = nn.BCEWithLogitsLoss()
+    test_losses = []
+    all_predictions = []
+    all_labels = []
+
+    with torch.no_grad():
+        test_loop = create_tqdm_bar(
+            test_loader, desc=f'Testing'
+            )
+        for test_i, (stacked_inputs_batch, y_batch) in test_loop:
+            stacked_inputs_batch = stacked_inputs_batch.to(device)
+            y_batch = y_batch.to(device, non_blocking=True)
+            #stacked_inputs_batch = stacked_inputs_batch.unsqueeze(0)
+
+            with autocast(device_type=str(device)):
+                outputs = model(stacked_inputs_batch)
+                loss = criterion(outputs, y_batch)
+                test_losses.append(loss.item())
+
+                all_predictions.append(outputs.cpu().round().int())
+                all_labels.append(y_batch.cpu().int())
 
     avg_test_loss = sum(test_losses) / len(test_losses)
     print(f"Test MSE: {avg_test_loss:.4f}")
