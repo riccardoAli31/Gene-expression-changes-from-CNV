@@ -24,7 +24,10 @@ class PromoterCNN(nn.Module):
         # promoter region: 2kb
         # in shape batch_size * 1 * 3 * 2000
         # out shape batchS * 8 * 1 * 660 = (1980 / 3) + 1 = (N + 2 * P - F) / S + 1
-        self.conv1pro = nn.Conv2d(1, 8, kernel_size=(self.in_dim, 23), stride=(1, 3))
+        self.conv1pro = nn.Conv2d(
+            1, 8,
+            kernel_size=(self.in_dim, 23),
+            stride=(1, 3))
         self.relu1pro = nn.ReLU()
         self.droppro = nn.Dropout(0.3)
         # out shape 16 * 7 * 105 = (960 / 6) = (N + 2 * P - F) / S
@@ -36,7 +39,12 @@ class PromoterCNN(nn.Module):
 
         # gene body region: 8kb
         # out shape 16 * 7 * 2660 = (1980 / 2) = (N + 2 * P - F) / S
-        self.conv1gen = nn.Conv2d(1, 16, kernel_size=(self.in_dim, 23), stride=(1, 3), padding=(1,0))
+        height_padding = int((self.in_dim - 1) / 2)
+        self.conv1gen = nn.Conv2d(
+            1, 16,
+            kernel_size=(self.in_dim, 23),
+            stride=(1, 3),
+            padding=(height_padding,0))
         self.relu1gen = nn.ReLU()
         # out shape 16 * 7 * 440 = (2640 / 2) = (N - F) / S
         self.pool1gen = nn.MaxPool2d(kernel_size=(self.in_dim, 26), stride=(1, 6))
