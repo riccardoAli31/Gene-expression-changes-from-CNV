@@ -43,7 +43,7 @@ class ChromosomeCNN(nn.Module):
 
 # 1. Residual Block: add the initial information after 1 conv layer to avoid gradient going to 0, I also applied dilation to learn better long term features
 class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=5, dilation=4):
+    def __init__(self, in_channels, out_channels, kernel_size=5, dilation=3):
         super(ResidualBlock, self).__init__()
 
         self.conv1 = nn.Conv1d(out_channels, out_channels, kernel_size, padding=(kernel_size//2) * dilation, dilation=dilation)
@@ -83,7 +83,7 @@ class MultiScaleConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(MultiScaleConv, self).__init__()
         self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=5, padding="same")
-        self.conv2 = nn.Conv1d(in_channels, out_channels, kernel_size=25, padding="same")
+        self.conv2 = nn.Conv1d(in_channels, out_channels, kernel_size=15, padding="same")
 
     def forward(self, x):
         x1 = F.relu(self.conv1(x))
@@ -102,21 +102,21 @@ class ModifiedChromosomeCNN(nn.Module):
 
         self.conv1 = nn.Conv1d(in_channels=input_dim, out_channels=64, kernel_size=5, padding=2)
 
-        self.multi_scale = MultiScaleConv(64, 128)
+        self.multi_scale = MultiScaleConv(64, 64)
 
-        self.resblock1 = ResidualBlock(128, 128, dilation=4)
+        self.resblock1 = ResidualBlock(64, 64, dilation=4)
 
-        self.se_block = SEBlock(128)
+        self.se_block = SEBlock(64)
 
         self.adaptive_pool = nn.AdaptiveAvgPool1d(output_size=200)
 
         self.fc1 = None
-        self.fc2 = nn.Linear(128, output_dim)
+        self.fc2 = nn.Linear(64, output_dim)
 
     def initialize_fc1(self, x):
         if self.fc1 is None:
             flattened_size = x.shape[1] * x.shape[2]
-            self.fc1 = nn.Linear(flattened_size, 128).to(x.device)
+            self.fc1 = nn.Linear(flattened_size, 64).to(x.device)
 
     def forward(self, inputs_seq):
         x = inputs_seq
@@ -126,13 +126,13 @@ class ModifiedChromosomeCNN(nn.Module):
         x = self.resblock1(x)
         x = self.se_block(x)
 
-        x = flatten(x, start_dim=1)
-
         x = self.adaptive_pool(x)
+
+        x = flatten(x, start_dim=1)
 
         if self.fc1 is None:
             fc1_input_size = x.shape[1]
-            self.fc1 = nn.Linear(fc1_input_size, 128).to(x.device)
+            self.fc1 = nn.Linear(fc1_input_size, 64).to(x.device)
 
         x = self.fc1(x)
         x = self.fc2(x)
