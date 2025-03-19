@@ -140,12 +140,3 @@ avg_val_loss, best_model = train_model(
     model_path=model_dir, model_name=model_name, plot_path=plot_path
 )
 
-# TODO: run evaluation
-# test_data_root = data_root / 'embeddings' / batch_name / 'test'
-# assert test_data_root.is_dir(), \
-#     'Training data not found: {} not a directory'.format(test_data_root)
-# from src.network.evaluation import test_model
-# test_loader = DataLoader(b1_test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-# TODO: plot performance
-
