@@ -49,6 +49,8 @@ def train_model(model: nn.Module, hparams: dict, train_loader: DataLoader,
     assert plot_path.is_dir(), \
         'Directory for saving plots doesn\'t exists:\n{}'.format(plot_path)
     
+    tb_logger.add_hparams(hparams, dict())
+
     optimizer = optim.Adam(
         model.parameters(),
         lr=hparams.get('lr', 1e-3)
