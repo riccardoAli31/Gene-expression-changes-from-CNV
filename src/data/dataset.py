@@ -369,6 +369,17 @@ class CnvDataset(Dataset):
             else:
                 return Tensor([self.data_df.iloc[idx][self.target_type]])
 
+    def switch_target_type(self):
+        if self.target_type == 'classification':
+            self.target_type = 'expression_count'
+        else:
+            self.target_type = 'classification'
+            self.class_to_label = {
+                c: i for i, c in 
+                enumerate(self.data_df[self.target_type].unique())
+            }
+            self.label_to_class = {i: c for c, i in self.class_to_label.items()}
+
     def __len__(self):
         return self.data_df.shape[0]
 
